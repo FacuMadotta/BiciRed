@@ -122,18 +122,36 @@ struct StationStatus {
 }
 ```
 
+#### Arquitectura interna (threads)
+ 
+| Thread | Responsabilidad |
+|---|---|
+| `Acceptor` | Escucha el puerto TCP. Por cada conexión entrante (de una Station o de una App) spawnea un Handler. |
+| `Handler` (uno por conexión) | Maneja la comunicación con el cliente conectado. Traduce mensajes TCP a mensajes mpsc para el Server Actor. |
+| `Server Actor` | Único dueño de `HashMap<StationId, StationStatus>`. Actualiza entradas y responde consultas.|
+| `ElectionActor` | Detecta timeout de la vida del líder e inicia la elección por Bully. Procesa mensajes `Election` y `Coordinator`. |
+
 #### Mensajes que recibe
 
 | Mensaje         | Payload                                         | Reacción                                                              |
 |-----------------|-------------------------------------------------|-----------------------------------------------------------------------|
 | `StationUpdate` | `{ station_id, location, bikes, slots, ts }`    | Actualiza entrada en `station_table` si el timestamp es más reciente  |
 | `NearbyQuery`   | `{ location, radius_km }`                       | Filtra tabla por distancia, responde `NearbyResponse`                 |
+| `ReplicaSync` | `{ station_table }` | Reemplaza tabla local con la del líder (solo réplicas) |
+| `isAlive` | `{}` | Confirma que el líder sigue activo; resetea el timeout |
+| `Election` | `{ candidate_id }` | Participa en el Algoritmo de Bully |
+| `Coordinator` | `{ leader_id }` | Actualiza `leader_id` local; el emisor se proclama líder |
 
 #### Mensajes que envía
 
 | Mensaje          | Destino | Payload                                                         |
 |------------------|---------|-----------------------------------------------------------------|
 | `NearbyResponse` | App     | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
+| `ReplicaSync` | Otros CentralServer | `{ station_table }` |
+| `Heartbeat` | Réplicas (solo líder) | `{}` |
+| `Election` | Nodos con ID mayor | `{ candidate_id }` |
+| `Ok` | Nodo que inició elección | `{}` — "yo tomo el control" |
+| `Coordinator` | Todos los nodos | `{ leader_id }` |
 
 ---
 
