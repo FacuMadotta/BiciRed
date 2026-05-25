@@ -148,7 +148,7 @@ struct StationStatus {
 |------------------|---------|-----------------------------------------------------------------|
 | `NearbyResponse` | App     | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
 | `ReplicaSync` | Otros CentralServer | `{ station_table }` |
-| `Heartbeat` | Réplicas (solo líder) | `{}` |
+| `isAlive` | Réplicas (solo líder) | `{}` |
 | `Election` | Nodos con ID mayor | `{ candidate_id }` |
 | `Ok` | Nodo que inició elección | `{}` — "yo tomo el control" |
 | `Coordinator` | Todos los nodos | `{ leader_id }` |
