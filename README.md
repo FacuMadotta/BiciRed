@@ -40,7 +40,7 @@ Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thr
 | `CentralServer` | Mantiene estado global de todas las estaciones             |
 | `App`           | Simula la app móvil del usuario                            |
 
-Se pueden correr múltiples instalaciones de CentralServer simultáneamente. Una actúa como líder (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás réplicas (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
+Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente. Una actúa como **líder** (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás **réplicas** (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
 
 ---
 
@@ -98,6 +98,22 @@ enum SlotState {
 | `ReturnConfirmed`| App             | `{ charged_cents, timestamp_secs }`                  |
 | `ReturnRejected` | App             | `{ reason: String }`                                 |
 | `StationStatus`  | CentralServer   | `{ station_id, location, available_bikes, free_slots, timestamp_secs }` |
+| `Prepare`  | App   | `{}` - Verifica que la App sigue activa y sin reserva activa |
+| `PreparePayment`  | Actor de Pago | `{ card_token }` |
+| `Commit`  | Actor de Pago   | `{}` - confirma que el cobro una vez que ambos votan `Vote_Commit` |
+
+
+#### Protocolo de transporte
+
+TCP (stream sockets) con la App y con el CentralServer. `mpsc` internamenmte entre threads.
+
+#### Casos de interés
+
+- **Feliz (alquiler):** ver [Flujo 1 - 2PC](#flujo-1--alquiler-caso-feliz)
+- **Feliz (devolución):** App envía `ReturnRequest` -> `Station Actor` bloquea slot, calcula cargo -> responde `ReturnConfirmed`
+- **App muere durante 2PC:** Timeout en el socket -> transacción abortada, slot vuelve a `Occupied`.
+- **Pago rechazado:** `Actor de Pago` responde `Vote_Abort` -> `Station Actor` aborta -> `RentRejected`.
+- **Sin conectividad con CentralServer:** opera localmente, guarda la información recibida en un archivo local, y la envía al recuperar la red.
 
 ---
 
@@ -138,7 +154,7 @@ struct StationStatus {
 | `StationUpdate` | `{ station_id, location, bikes, slots, ts }`    | Actualiza entrada en `station_table` si el timestamp es más reciente  |
 | `NearbyQuery`   | `{ location, radius_km }`                       | Filtra tabla por distancia, responde `NearbyResponse`                 |
 | `ReplicaSync` | `{ station_table }` | Reemplaza tabla local con la del líder (solo réplicas) |
-| `isAlive` | `{}` | Confirma que el líder sigue activo; resetea el timeout |
+| `Heartbeat` | `{}` | Confirma que el líder sigue activo; resetea el timeout |
 | `Election` | `{ candidate_id }` | Participa en el Algoritmo de Bully |
 | `Coordinator` | `{ leader_id }` | Actualiza `leader_id` local; el emisor se proclama líder |
 
@@ -148,10 +164,19 @@ struct StationStatus {
 |------------------|---------|-----------------------------------------------------------------|
 | `NearbyResponse` | App     | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
 | `ReplicaSync` | Otros CentralServer | `{ station_table }` |
-| `isAlive` | Réplicas (solo líder) | `{}` |
+| `Heartbeat` | Réplicas (solo líder) | `{}` |
 | `Election` | Nodos con ID mayor | `{ candidate_id }` |
 | `Ok` | Nodo que inició elección | `{}` — "yo tomo el control" |
 | `Coordinator` | Todos los nodos | `{ leader_id }` |
+
+#### Protocolo de transporte
+
+TCP (stream sockets) para toda comunicación.
+
+#### Casos de interés
+
+- **Feliz:** Station envía `StationUpdate` al líder -> líder actualiza tabla y envía `ReplicaSync` -> App consulta réplica -> `NearbyResponse`
+- **Líder cae:** réplica detecta timeout de `Heartbeat` -> inicia elección Bully -> nuevo líder anuncia `Coordinator` con su dirección
 
 ---
 
@@ -183,6 +208,7 @@ struct ActiveRental {
 | `ReturnConfirmed`| Station       | `{ charged_cents, timestamp_secs }`                             |
 | `ReturnRejected` | Station       | `{ reason: String }`                                            |
 | `NearbyResponse` | CentralServer | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
+| `Prepare` | Station | `{}` - Station verifica que la App sigue activa y sin reserva |
 
 #### Mensajes que envía
 
@@ -191,6 +217,18 @@ struct ActiveRental {
 | `NearbyQuery`   | CentralServer | `{ location, radius_km }`                        |
 | `RentRequest`   | Station       | `{ user_id, slot_index, card_token }`            |
 | `ReturnRequest` | Station       | `{ user_id, bike_id, slot_index, started_at }`   |
+| `Vote_Commit` | Station | `{}` - App activa y sin reserva activa |
+| `Vote_Abort` | Station | `{}` - App con reserva activa o error |
+
+#### Protocolo de transporte
+
+TCP (stream sockets). No escucha ningún puerto, solo incia conexiones.
+
+#### Casos de interés
+
+- **Sin señal consultado disponibilidad:** usa `cached_stations` (última `NearbyResponse` recibida).
+- **Sin señal alquilando o devolviendo:** la App ya tiene la IP de la Station guardada en `cached_stations`; conecta directamente sin pasar por el CentralServer.
+- **Líder caído:** reintenta con el siguiente peer conocido de su lidta hasta encontrar uno activo.
 
 ---
 
@@ -199,17 +237,20 @@ struct ActiveRental {
 ### Flujo 1 — Alquiler (caso feliz)
 
 ```
-App  ──RentRequest──►  Station
-App  ◄──RentConfirmed──  Station
-                         Station  ──StationStatus──►  CentralServer
+App  ──RentRequest──────────────────►  Station
+     ◄── [2PC interno: Prepare / Vote / Commit] ──►  Actor de Pago
+App  ◄──RentConfirmed────────────────  Station
+                      Station  ──StationStatus──►  CentralServer líder
+                                       líder  ──ReplicaSync──►  Réplicas
 ```
 
 ### Flujo 2 — Devolución (caso feliz)
 
 ```
-App  ──ReturnRequest──►  Station
-App  ◄──ReturnConfirmed──  Station
-                           Station  ──StationStatus──►  CentralServer
+App  ──ReturnRequest────────────────►  Station
+App  ◄──ReturnConfirmed──────────────  Station
+                      Station  ──StationStatus──►  CentralServer líder
+                                       líder  ──ReplicaSync──►  Réplicas
 ```
 
 ### Flujo 3 — Consulta de estaciones cercanas
@@ -219,6 +260,28 @@ App  ──NearbyQuery──►  CentralServer
 App  ◄──NearbyResponse──  CentralServer
 ```
 
+### Flujo 4 — Caída del líder y reconexión
+ 
+```
+CentralServer líder deja de enviar Heartbeat
+CentralServer réplica_2 detecta timeout
+réplica_2  ──Election(id=2)──►  réplica_3
+réplica_2  ──Election(id=2)──►  réplica_4
+réplica_4  ──Ok──────────────►  réplica_2   (toma el control)
+réplica_4  ──Election(id=4)──►  (nadie con ID mayor responde)
+réplica_4 se proclama líder
+réplica_4  ──Coordinator(id=4, addr)──►  réplica_2
+réplica_4  ──Coordinator(id=4, addr)──►  réplica_3
+ 
+Station  ──WhoIsLeader──►  réplica_2
+Station  ◄──LeaderIs(addr=réplica_4)──  réplica_2
+Station reconecta al nuevo líder
+ 
+App  ──WhoIsLeader──►  réplica_2
+App  ◄──LeaderIs(addr=réplica_4)──  réplica_2
+App reconecta al nuevo líder
+```
+ 
 ---
 
 ## Manejo de errores y caídas
@@ -251,20 +314,28 @@ Usa `cached_stations` (última `NearbyResponse` recibida).
 
 Para evitar que `CentralServer` sea un único punto de falla, se mantiene una cantidad de réplicas constantes del servidor ejecutándose de forma independiente.
 
+**Detección de caída:** el líder envía un `Hearbeat` periódico a todas las réplicas. Si una réplica no recibe el hearbeat tras varios intervalos, inicia la elección.
+
+**Algoritmo**:
+1. El nodo que detecta la caída envía `Election` a todos los nodos con ID mayor.
+2. Si nadie responde -> se proclama líder, anuncia `Coordinator` con su dirección a todos.
+3. Si alguien responde `Ok` -> ese nodo toma el control y repite el proceso hacia arriba.
+4. El nodo con el ID más alto que esté activo siempre gana.
+
+**Reconexión:** al recibir `Coordinator`, cada réplica actualiza su `leader_addr`. Cuando una Station o App falla al conectarse con el líder anterior, intenta con el siguiente peer conocido de su lista.
+
 **Roles:**
 
 ```
 Station_1  ──StationUpdate──►  CentralServer_líder
 Station_2  ──StationUpdate──►  CentralServer_líder
-                               CentralServer_líder  ──replica──►  CentralServer_2
-                               CentralServer_líder  ──replica──►  CentralServer_3
+                               CentralServer_líder  ──ReplicaSync──►  CentralServer_2
+                               CentralServer_líder  ──ReplicaSync──►  CentralServer_3
 
 App_1  ──NearbyQuery──►  CentralServer_2  (réplica)
 App_2  ──NearbyQuery──►  CentralServer_3  (réplica)
 ```
-
-La detección de la caída del líder se dará mediante la utilización de un mensaje con un byte de contenido, que busca validar que este se encuentra en buen estado. Ante la llegada de un timeout en uno de los procesos réplica que no reciba el mensaje en cierto tiempo (un intervalo en el que varios mensajes de aviso sean mandados, para evitar elección ante la presencia de latencia),  se comenzará con la fase de elección de un nuevo líder mediante el algoritmo de Bully
-
+Ver detalle en [Diagrama UML](#diagrama-de-elección-de-líder-bully)
 
 ---
 
@@ -312,4 +383,8 @@ El algoritmo de commit en dos fases permitirá que una bicicleta se libere sóla
 ### Diagrama de flujo alquiler
 
 ![Diagrama de flujo](doc/flow_diagram.png)
+
+### Diagrama de elección de líder (Bully)
+
+![Diagrama de elección de líder](doc/alg_bully.png)
 
