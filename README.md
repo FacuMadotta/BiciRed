@@ -6,6 +6,13 @@ El sistema modela una red de estaciones de bicicletas distribuidas por la ciudad
 
 Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thread independiente que sólo se comunica a través de canales (usando la librería de Rust mpsc) tipados. Por lo que, no hay memoria compartida entre actores.
 
+### Integrantes
+
+| Nombre y Apellido | Padrón |
+| :--- | :--- |
+| Facundo Madotta | 112180 | 
+| Fabricio Batastini | 111828 |
+| Manuel Peñalva | 111696 |
 
 ---
 
