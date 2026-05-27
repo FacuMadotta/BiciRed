@@ -1,0 +1,9 @@
+[package]
+name = "central_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+actix = "0.13"
+
