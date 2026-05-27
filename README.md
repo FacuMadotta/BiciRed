@@ -88,6 +88,7 @@ enum SlotState {
 |-----------------|--------------------------------------------|-----------------------------------------------------------------------------------------------|
 | `RentRequest`   | `{ user_id, slot_index, card_token }`      | Si slot ocupado → desbloquea bicicleta, responde `RentConfirmed`; si no → `RentRejected`      |
 | `ReturnRequest` | `{ user_id, bike_id, slot_index, started_at }` | Si slot vacío → bloquea bicicleta, calcula cargo proporcional al tiempo, responde `ReturnConfirmed`; si no → `ReturnRejected` |
+| `NotLeader` | CentralServer | `{ leader_addr: SocketAddr }` - Actualiza su dirección interna localmente del líder y reintenta enviar su `StationUpdate` a la nueva IP. |
 
 #### Mensajes que envía
 
@@ -113,7 +114,7 @@ TCP (stream sockets) con la App y con el CentralServer. `mpsc` internamenmte ent
 - **Feliz (devolución):** App envía `ReturnRequest` -> `Station Actor` bloquea slot, calcula cargo -> responde `ReturnConfirmed`
 - **App muere durante 2PC:** Timeout en el socket -> transacción abortada, slot vuelve a `Occupied`.
 - **Pago rechazado:** `Actor de Pago` responde `Vote_Abort` -> `Station Actor` aborta -> `RentRejected`.
-- **Sin conectividad con CentralServer:** opera localmente, guarda la información recibida en un archivo local, y la envía al recuperar la red.
+- **Sin conectividad con CentralServer:** opera localmente, guarda la información recibida en un archivo local (CSV o JSON), y la envía al recuperar la red.
 
 ---
 
@@ -168,6 +169,8 @@ struct StationStatus {
 | `Election` | Nodos con ID mayor | `{ candidate_id }` |
 | `Ok` | Nodo que inició elección | `{}` — "yo tomo el control" |
 | `Coordinator` | Todos los nodos | `{ leader_id }` |
+| `NotLeader` | Station | `{ leader_addr: SocketAddr }` - Rechaza un `StationUpdate` (porque este nodo es réplica) y redirige a la Station al líder actual. |
+| `NotReplica` | App | `{ replica_addr: SocketAddr }` - Rechaza un `NearbyQuery` (porque este nodo es líder y delega la carga) y redirige a la App hacia una réplica. |
 
 #### Protocolo de transporte
 
@@ -209,6 +212,7 @@ struct ActiveRental {
 | `ReturnRejected` | Station       | `{ reason: String }`                                            |
 | `NearbyResponse` | CentralServer | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
 | `Prepare` | Station | `{}` - Station verifica que la App sigue activa y sin reserva |
+| `NotReplica` | CentralServer | `{ replica_addr: SocketAddr }` - Actualiza la IP del servidor en uso localmente y reintenta el `NearbyQuery` a la nueva dirección recibida. |
 
 #### Mensajes que envía
 
@@ -267,19 +271,27 @@ CentralServer líder deja de enviar Heartbeat
 CentralServer réplica_2 detecta timeout
 réplica_2  ──Election(id=2)──►  réplica_3
 réplica_2  ──Election(id=2)──►  réplica_4
-réplica_4  ──Ok──────────────►  réplica_2   (toma el control)
+
+réplica_3  ──Ok──────────────►  réplica_2   (R3 cancela la elección de R2)
+réplica_4  ──Ok──────────────►  réplica_2   (R4 cancela la elección de R2)
+
+réplica_3  ──Election(id=3)──►  réplica_4   (R3 inicia su propia elección)
+réplica_4  ──Ok──────────────►  réplica_3   (R4 cancela la elección de R3)
+
 réplica_4  ──Election(id=4)──►  (nadie con ID mayor responde)
 réplica_4 se proclama líder
 réplica_4  ──Coordinator(id=4, addr)──►  réplica_2
 réplica_4  ──Coordinator(id=4, addr)──►  réplica_3
+
+Station intenta reportar estado usando la última IP conocida:
+Station  ──StationUpdate──►  réplica_2  (ex líder u otro peer al azar)
+Station  ◄──NotLeader(leader_addr=réplica_4)──  réplica_2
+Station  ──StationUpdate──►  réplica_4  (actualización exitosa)
  
-Station  ──WhoIsLeader──►  réplica_2
-Station  ◄──LeaderIs(addr=réplica_4)──  réplica_2
-Station reconecta al nuevo líder
- 
-App  ──WhoIsLeader──►  réplica_2
-App  ◄──LeaderIs(addr=réplica_4)──  réplica_2
-App reconecta al nuevo líder
+App intenta buscar bicicletas en un nodo que resultó ser el nuevo líder:
+App  ──NearbyQuery──►  réplica_4
+App  ◄──NotReplica(replica_addr=réplica_2)──  réplica_4
+App  ──NearbyQuery──►  réplica_2  (consulta exitosa)
 ```
  
 ---
@@ -322,7 +334,7 @@ Para evitar que `CentralServer` sea un único punto de falla, se mantiene una ca
 3. Si alguien responde `Ok` -> ese nodo toma el control y repite el proceso hacia arriba.
 4. El nodo con el ID más alto que esté activo siempre gana.
 
-**Reconexión:** al recibir `Coordinator`, cada réplica actualiza su `leader_addr`. Cuando una Station o App falla al conectarse con el líder anterior, intenta con el siguiente peer conocido de su lista.
+**Reconexión:** al recibir `Coordinator`, cada réplica actualiza su `leader_addr`. Por el lado de los clientes (Station o App), mantienen localmente una lista de direcciones IP de los nodos del servidor. Si fallan al conectarse con un nodo, intentan con el siguiente de su lista. Si logran conectarse pero el nodo no tiene el rol adecuado para procesar el mensaje, el servidor responderá con `NotLeader` o `NotReplica`, indicándole al cliente la dirección IP correcta a la cual debe reconectarse.
 
 **Roles:**
 
