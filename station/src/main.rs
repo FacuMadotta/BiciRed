@@ -1,32 +1,39 @@
 use std::env;
-use std::net::{TcpListener, TcpStream};
-use std::io::{Read, Write};
-use std::thread;
+use std::net::TcpStream;
+use actix::prelude::*;
+mod actors;
+use actors::*;
+use common::*;
 
-
-fn handle_client(mut socket: TcpStream) {
-    let mut buf = [0u8; 1024];
-    match socket.read(&mut buf) {
-        // Recepcion de datos del cliente y bicicleta a alquilar
-    }
-}
-
-fn main() {
+#[actix::main]
+async fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let listening_ip = args.get(1).map(|s| s.as_str());
-    let Some(ip) = listening_ip else {
-        eprintln!("No IP provided");
-        return;
-    };
-    println!("Station starting and listening on {}", ip);
-
-    let listener = TcpListener::bind(ip).expect("failed to bind");
-    for stream in listener.incoming() {
-        match stream {
-            Ok(s) => {
-                thread::spawn(|| handle_client(s));
-            }
-            Err(e) => eprintln!("accept error: {}", e),
-        }
+    if args.len() < 3 {
+        println!("Usage: station <ip_estacion> <ip_servidor_central>");
+        return Ok(());
     }
+    
+    let ip = args[1].clone();
+    let central_ip = &args[2];
+
+    println!("Station starting on {}", ip);
+
+    let central_socket = TcpStream::connect(central_ip)
+        .expect("Could not connect to Central Server");
+
+    // Esto esta harcodeado inicialmente.
+    let my_location = Location { x: 0.0, y: 0.0 }; 
+    let station_data = Station::new(1, my_location, 10);
+    
+    let station_addr = StationActor::new(station_data, central_socket).start();
+
+    Acceptor::new(ip, move |stream| {
+        println!("New connection accepted, spawning ConnectionActor");
+        ConnectionActor::new(stream, station_addr.clone()).start();
+    }).start();
+
+    println!("Station is running. Press Ctrl+C to stop.");
+    
+    futures::future::pending::<()>().await;
+    Ok(())
 }
