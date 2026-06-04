@@ -2,21 +2,6 @@ use actix::prelude::*;
 use common::*;
 use std::net::TcpStream;
 
-// Actor que maneja la conexión con un cliente, recibiendo solicitudes, y enviando respuestas.
-pub struct ConnectionActor {
-    pub socket: TcpStream,
-    pub station_addr: Addr<StationActor>,
-}
-
-impl ConnectionActor {
-    pub fn new(socket: TcpStream, station: Addr<StationActor>) -> Self {
-        Self { socket, station_addr: station }
-    }
-}
-
-impl Actor for ConnectionActor {
-    type Context = Context<Self>;
-}
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
 pub struct Station {
@@ -58,4 +43,20 @@ impl StationActor {
 
 impl Actor for StationActor {
     type Context = Context<Self>;
+}
+
+impl Handler<RentRequest> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RentRequest, _ctx: &mut Self::Context) {
+        
+    }   
+}
+
+impl Handler<ReturnRequest> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReturnRequest, _ctx: &mut Self::Context) {
+        
+    }
 }

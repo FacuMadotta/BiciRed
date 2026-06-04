@@ -1,8 +1,10 @@
 use std::env;
 use std::net::TcpStream;
 use actix::prelude::*;
-mod actors;
-use actors::*;
+mod station;
+mod connection;
+use station::{StationActor, Station};
+use connection::ConnectionActor;
 use common::*;
 
 #[actix::main]
