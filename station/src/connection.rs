@@ -12,6 +12,18 @@ impl ConnectionActor {
     pub fn new(socket: TcpStream, station: Addr<StationActor>) -> Self {
         Self { socket, station_addr: station }
     }
+
+    fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context) 
+    where 
+        T: Deserializable + 'static,
+        StationActor: Handler<RequestMessage<T>>,
+    {
+        let request_data = T::deserialize(message_text);
+        self.station_addr.do_send(RequestMessage {
+            request: request_data,
+            response: ctx.address(),
+        });
+    }
 }
 
 impl Actor for ConnectionActor {
@@ -28,6 +40,15 @@ impl Actor for ConnectionActor {
     }
 }
 
+pub struct RequestMessage<T> {
+    pub request: T,
+    pub response: Addr<ConnectionActor>,
+}
+
+impl<T> Message for RequestMessage<T> where T: Send + 'static {
+    type Result = ();
+}
+
 impl StreamHandler<std::io::Result<Vec<u8>>> for ConnectionActor {
     fn handle(&mut self, msg: std::io::Result<Vec<u8>>, _ctx: &mut Self::Context) {
         match msg {
@@ -37,14 +58,8 @@ impl StreamHandler<std::io::Result<Vec<u8>>> for ConnectionActor {
                     let message_type = MessageType::deserialize(message_text);
                     
                     match message_type {
-                        MessageType::RentRequest => {
-                            let rent_request = RentRequest::deserialize(message_text);
-                            self.station_addr.do_send(rent_request);
-                        }
-                        MessageType::ReturnRequest => {
-                            let return_request = ReturnRequest::deserialize(message_text);
-                            self.station_addr.do_send(return_request);
-                        }
+                        MessageType::RentRequest => self.send_message::<RentRequest>(message_text, _ctx),
+                        MessageType::ReturnRequest => self.send_message::<ReturnRequest>(message_text, _ctx),
                         _ => {
                             println!("Unknown message type received: {}", message_text);
                         }
