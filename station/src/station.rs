@@ -29,24 +29,26 @@ impl Station {
         Self { id, location, slots }
     }
 
-    fn is_slot_available(&self, slot_index: usize) -> bool {
+    fn is_bike_available(&self, slot_index: usize) -> bool {
         matches!(self.slots.get(slot_index).map(|s| &s.state), Some(SlotState::Occupied { .. }))
     }
 
-    fn lock_bike(&mut self, slot_index: usize) -> Option<BikeId> {
+    fn unlock_bike(&mut self, slot_index: usize) -> Option<BikeId> {
         if let Some(slot) = self.slots.get_mut(slot_index) {
             if let SlotState::Occupied { bike_id } = slot.state {
-                slot.state = SlotState::Reserved; // Marcar el slot como reservado
+                slot.state = SlotState::Empty; // Marcar el slot como vacío
                 return Some(bike_id);
             }
-        }
+        } 
     }
 
-    fn get_bike_id(&self, slot_index: usize) -> Option<BikeId> {
-        if let Some(slot) = self.slots.get(slot_index) {
-            if let SlotState::Occupied { bike_id } = slot.state {
-                return Some(bike_id);
-            }
+    fn is_slot_free(&self, slot_index: usize) -> bool {
+        matches!(self.slots.get(slot_index).map(|s| &s.state), Some(SlotState::Empty))
+    }
+
+    fn return_bike(&mut self, slot_index: usize, bike_id: BikeId) {
+        if let Some(slot) = self.slots.get_mut(slot_index) {
+            slot.state = SlotState::Occupied { bike_id }; // Marcar el slot como ocupado con la bicicleta devuelta
         }
     }
 }
@@ -70,13 +72,13 @@ impl Handler<RequestMessage<RentRequest>> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: RequestMessage<RentRequest>, _ctx: &mut Self::Context) {
-        if self.is_slot_available(msg.request.slot_index) { 
-            self.lock_bike(msg.request.slot_index);
+        if self.is_bike_available(msg.request.slot_index) { 
+            let bike_id = self.unlock_bike(msg.request.slot_index);
             msg.response.do_send(RentConfirmed {
-                bike_id: self.get_bike_id(msg.request.slot_index),
+                bike_id: bike_id,
                 pre_auth_cents: 100, 
-                timestamp_secs: 0, 
-            });// Harcodeo inicial
+                timestamp_secs: 0, // Harcodeo inicial 
+            });
         } else {
             msg.response.do_send(RentRejected {
                 reason: "Slot not available".to_string(),
@@ -89,14 +91,15 @@ impl Handler<RequestMessage<ReturnRequest>> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: RequestMessage<ReturnRequest>, _ctx: &mut Self::Context) {
-        if let Some(bike_id) = self.lock_bike(msg.request.slot_index) {
+        if self.is_slot_free(msg.request.slot_index) {
+            self.return_bike(msg.request.slot_index, msg.request.bike_id);
             msg.response.do_send(ReturnConfirmed {
                 charged_cents: 150, 
-                timestamp_secs: 0,
-            }); // Harcodeo inicial, se debería calcular el charged_cents basado en la duración del alquiler y la tarifa.
+                timestamp_secs: 0, // Harcodeo inicial
+            });
         } else {
             msg.response.do_send(ReturnRejected {
-                reason: "Slot not available for return".to_string(),
+                reason: "Slot not free".to_string(),
             });
         }
     }
