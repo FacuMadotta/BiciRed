@@ -1,12 +1,37 @@
 use std::io::{self, Write};
-use common::Location;
+use common::{Location, load_servers_csv};
+use std::env;
 
 mod client;
 mod models;
 use client::AppClient;
 
 fn main() {
-    let mut app = AppClient::new(99, vec!["127.0.0.1:8080".to_string()]); // Se me ocurrio hacerlo en archivo csv; se lea y sea random de ahi (FORMATO, id_servidor, ip, puerto)
+    let args: Vec<String> = env::args().collect();
+    
+    if args.len() < 2 {
+        println!("Uso: app <ruta_al_archivo_servers.csv>");
+        return;
+    }
+
+    let csv_path = &args[1];
+    
+    let server_nodes = match load_servers_csv(csv_path) {
+        Ok(nodes) => nodes,
+        Err(e) => {
+            println!("Error fatal al leer el archivo CSV '{}': {}", csv_path, e);
+            return;
+        }
+    };
+
+    if server_nodes.is_empty() {
+        println!("Error: El archivo CSV está vacío o no tiene servidores válidos.");
+        return;
+    }
+
+    let server_addrs: Vec<String> = server_nodes.into_iter().map(|node| node.addr).collect();
+
+    let mut app = AppClient::new(99, server_addrs);
     let test_station_ip = "127.0.0.1:9000"; // yo lo estoy probando con el comando ns 127.0.0.1:8080 y mandandole mensajes que puede hacer la estación. Pero la misma idea que el servidor con el id de estacion, cant de bicis, etc (formato, id_estacion, ip, puerto, cantidad_bicis, cantidad_slots)
     
     let mut input = String::new();
