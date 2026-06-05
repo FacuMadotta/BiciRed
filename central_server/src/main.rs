@@ -2,6 +2,7 @@ use std::env;
 use actix::prelude::*;
 use common::Acceptor;
 
+mod bully;
 mod actors;
 mod messages_actors;
 

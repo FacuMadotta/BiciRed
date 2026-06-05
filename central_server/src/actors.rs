@@ -6,6 +6,7 @@ use actix::prelude::*;
 use std::io::Write;
 use crate::messages_actors::*;
 use std::io::Read;
+use std::time::Instant;
 use crate::messages_actors::IncomingData;
 use crate::messages_actors::NewConnectionMessage;
 
@@ -94,6 +95,40 @@ impl Handler<NearbyStationsResponseMessage> for ConnectionActor {
     }
 }
 
+impl Handler<LeaderAliveMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
+        let _ = self.socket.write_all(b"LEADER_ALIVE");
+    }
+}
+
+impl Handler<SendElectionMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SendElectionMessage, _ctx: &mut Self::Context) {
+        let election_msg = format!("ELECTION|{}", msg.candidate_id);
+        let _ = self.socket.write_all(election_msg.as_bytes());
+    }
+}
+
+impl Handler<SendElectionAckMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: SendElectionAckMessage, _ctx: &mut Self::Context) {
+        let _ = self.socket.write_all(b"ELECTION_ACK");
+    }
+}
+
+impl Handler<SendCoordinatorMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SendCoordinatorMessage, _ctx: &mut Self::Context) {
+        let coord_msg = format!("COORDINATOR|{}", msg.leader_id);
+        let _ = self.socket.write_all(coord_msg.as_bytes());
+    }
+}
+
 pub struct CentralServerActor {
     pub station_table: HashMap<StationId, StationStatus>,
 }
@@ -147,17 +182,31 @@ pub struct ElectorActor {
     pub central_server_addr: Addr<CentralServerActor>,
     pub is_leader: bool,
     pub leader_id: Option<ServerId>,
-    pub connection_addrs: Vec<Addr<ConnectionActor>>,
+    pub peer_servers: HashMap<ServerId, Addr<ConnectionActor>>,
+    pub leader_timeout: Instant,
+    pub election_in_progress: bool,
 }
 
 impl ElectorActor {
     pub fn new(server_id: ServerId, central: Addr<CentralServerActor>) -> Self {
-        Self { server_id, central_server_addr: central, is_leader: false, leader_id: None, connection_addrs: Vec::new() }
+        Self {
+            server_id,
+            central_server_addr: central,
+            is_leader: false,
+            leader_id: None,
+            peer_servers: HashMap::new(),
+            leader_timeout: Instant::now(),
+            election_in_progress: false,
+        }
     }
 }
 
 impl Actor for ElectorActor {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.start_bully_timeout_monitor(ctx);
+    }
 }
 
 pub struct SpawnerActor {
