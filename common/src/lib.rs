@@ -4,6 +4,7 @@ pub mod message_types;
 pub mod messages;
 pub mod serialization;
 pub mod acceptor;
+pub mod net_utils;
 
 pub use entities::*;
 pub use deserialization::*;
@@ -11,3 +12,4 @@ pub use message_types::*;
 pub use messages::*;
 pub use serialization::*;
 pub use acceptor::*;
+pub use net_utils::*;

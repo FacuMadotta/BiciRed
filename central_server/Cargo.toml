@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 common = { path = "../common" }
 actix = "0.13"
+futures = "0.3"
 

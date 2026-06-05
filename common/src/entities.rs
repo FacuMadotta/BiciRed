@@ -4,11 +4,13 @@ pub type BikeId = u32;
 pub type UserId = u32;
 pub type ServerId = u32;
 
+#[derive(Debug, Clone)]
 pub struct Location {
     pub x: f64,
     pub y: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct StationStatus {
     pub station_id: StationId,
     pub location: Location,

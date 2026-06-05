@@ -1,7 +1,6 @@
 use actix::prelude::*;
 use common::*;
-use std::collections::HashMap;
-use std::net::TcpStream;
+use crate::actors::ConnectionActor;
 
 // Connection --> Central
 #[derive(Message, Debug, Clone)]
@@ -63,3 +62,11 @@ pub struct NearbyStationsRequestMessage {
 pub struct NearbyStationsResponseMessage {
     pub stations: Vec<StationStatus>,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct IncomingData(pub Vec<u8>);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct NewConnectionMessage(pub std::net::TcpStream);
