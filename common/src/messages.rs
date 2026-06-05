@@ -97,10 +97,24 @@ pub struct PreparePayment {
     pub card_token: String,
 }
 
+pub trait TransactionMessage {
+    fn new(id: u64) -> Self;
+    fn transaction_id(&self) -> u64;
+}
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct VoteCommit {
     pub transaction_id: u64,
+}
+
+impl TransactionMessage for VoteCommit {
+    fn new(id: u64) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> u64 {
+        self.transaction_id
+    }
 }
 
 #[derive(Message)]
@@ -109,10 +123,28 @@ pub struct VoteAbort {
     pub transaction_id: u64,
 }
 
+impl TransactionMessage for VoteAbort {
+    fn new(id: u64) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> u64 {
+        self.transaction_id
+    }
+}
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct CommitPayment {
     pub transaction_id: u64,
+}
+
+impl TransactionMessage for CommitPayment {
+    fn new(id: u64) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> u64 {
+        self.transaction_id
+    }
 }
 
 #[derive(Message)]
@@ -121,8 +153,26 @@ pub struct CapturePayment {
     pub transaction_id: u64,
 }
 
+impl TransactionMessage for CapturePayment {
+    fn new(id: u64) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> u64 {
+        self.transaction_id
+    }
+}
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct RollbackPayment {
     pub transaction_id: u64,
+}
+
+impl TransactionMessage for RollbackPayment {
+    fn new(id: u64) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> u64 {
+        self.transaction_id
+    }
 }

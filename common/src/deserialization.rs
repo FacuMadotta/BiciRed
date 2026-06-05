@@ -170,3 +170,25 @@ impl Deserializable for StationStatus {
         }
     }
 }
+
+impl Deserializable for PreparePayment {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 4);
+        Self {
+            transaction_id: parts[1].parse().expect("Invalid transaction_id"),
+            amount_cents: parts[2].parse().expect("Invalid amount_cents"),
+            card_token: parts[3].to_string(),
+        }
+    }
+}
+
+impl<T: TransactionMessage> Deserializable for T {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 2);
+        let id = parts[1].parse().expect("Invalid transaction_id");
+        Self::new(id)
+    }
+}
+
