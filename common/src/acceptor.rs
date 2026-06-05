@@ -20,7 +20,7 @@ impl Acceptor {
     
     pub fn start(self) {
         thread::spawn(move || {
-            let listener = TcpListener::bind(&self.address).expect("Failed to bind Acceptor");
+            let listener = TcpListener::bind(&self.address).expect("Error en bindear el Acceptor");
             println!("Acceptor escuchando en {}", self.address);
             
             for stream in listener.incoming() {

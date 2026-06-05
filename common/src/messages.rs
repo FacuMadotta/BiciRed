@@ -1,11 +1,16 @@
 use crate::entities::*;
+use actix::prelude::*;
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct RentRequest {
     pub user_id: UserId,
     pub slot_index: usize,
     pub card_token: String,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct ReturnRequest {
     pub user_id: UserId,
     pub bike_id: BikeId,
@@ -13,41 +18,73 @@ pub struct ReturnRequest {
     pub started_at_secs: u64,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct RentConfirmed {
     pub bike_id: BikeId,
     pub pre_auth_cents: u32,
     pub timestamp_secs: u64,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct RentRejected {
     pub reason: String,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")] 
 pub struct ReturnConfirmed {
     pub charged_cents: u32,
     pub timestamp_secs: u64,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct ReturnRejected {
     pub reason: String,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct StationUpdate {
     pub station: StationStatus,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct IsAlive;
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct Election {
     pub candidate_id: ServerId,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct Coordinator {
     pub leader_id: ServerId,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct Ack;
 
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct NearbyResponse {
     pub stations: Vec<StationStatus>,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct IncomingData(pub Vec<u8>);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ConnectionClosed;
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct NewConnectionMessage(pub std::net::TcpStream);

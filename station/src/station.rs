@@ -1,6 +1,7 @@
 use actix::prelude::*;
 use common::*;
 use std::net::TcpStream;
+use crate::connection::RequestMessage;
 
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
@@ -40,6 +41,7 @@ impl Station {
                 return Some(bike_id);
             }
         } 
+        None
     }
 
     fn is_slot_free(&self, slot_index: usize) -> bool {
@@ -72,16 +74,17 @@ impl Handler<RequestMessage<RentRequest>> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: RequestMessage<RentRequest>, _ctx: &mut Self::Context) {
-        if self.is_bike_available(msg.request.slot_index) { 
-            let bike_id = self.unlock_bike(msg.request.slot_index);
+        println!("StationActor recibiendo RentRequest para slot {}", msg.request.slot_index);
+        if self.station.is_bike_available(msg.request.slot_index) { 
+            let bike_id = self.station.unlock_bike(msg.request.slot_index);
             msg.response.do_send(RentConfirmed {
-                bike_id: bike_id,
+                bike_id: bike_id.expect("Bici debería estar disponible"),
                 pre_auth_cents: 100, 
                 timestamp_secs: 0, // Harcodeo inicial 
             });
         } else {
             msg.response.do_send(RentRejected {
-                reason: "Slot not available".to_string(),
+                reason: "Bici no disponible".to_string(),
             });
         }
     }   
@@ -91,15 +94,15 @@ impl Handler<RequestMessage<ReturnRequest>> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: RequestMessage<ReturnRequest>, _ctx: &mut Self::Context) {
-        if self.is_slot_free(msg.request.slot_index) {
-            self.return_bike(msg.request.slot_index, msg.request.bike_id);
+        if self.station.is_slot_free(msg.request.slot_index) {
+            self.station.return_bike(msg.request.slot_index, msg.request.bike_id);
             msg.response.do_send(ReturnConfirmed {
                 charged_cents: 150, 
                 timestamp_secs: 0, // Harcodeo inicial
             });
         } else {
             msg.response.do_send(ReturnRejected {
-                reason: "Slot not free".to_string(),
+                reason: "Slot no está libre".to_string(),
             });
         }
     }
