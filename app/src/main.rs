@@ -1,91 +1,42 @@
-use std::io::{self, Write, Read};
-use std::net::TcpStream;
+use std::io::{self, Write};
+use common::Location;
 
-
-fn query_central() {
-
-    // Ordeno servers conocidos de mas cercana a mas lejana
-
-    for i in 0..len(servers) {
-        // let addr = servers[i].address;
-        match TcpStream::connect(addr) {
-        Ok(mut s) => {
-
-            // Envio NearByQuery con Location y radio
-
-            let mut buf = [0u8; 1024];
-            match s.read(&mut buf) {
-                Ok(n) if n > 0 => {
-                    // Mostrar estaciones cercanas
-                    break;
-                },
-                _ => println!("No response from central"),
-            }
-        }
-        Err(e) => println!("Failed to connect: {}", e),
-    }
-    }
-    
-}
-
-fn rent_station(addr: &str) {
-    match TcpStream::connect(addr) {
-        Ok(mut s) => {
-
-            // Enviar datos de alquiler
-
-            let mut buf = [0u8; 1024];
-            match s.read(&mut buf) {
-                Ok(n) if n > 0 => {
-                    // if rent confirmed, mostrar datos de alquiler
-                    // Agregamos la bicicleta al usuario
-
-                    // if rent rejected, mostrar motivo
-                },
-                _ => println!("No response from station"),
-            }
-        }
-        Err(e) => println!("Failed to connect: {}", e),
-    }
-}
-
-fn return_station(addr: &str) {
-    match TcpStream::connect(addr) {
-        Ok(mut s) => {
-
-            // Enviar datos de devolución
-
-            let mut buf = [0u8; 1024];
-            match s.read(&mut buf) {
-                Ok(n) if n > 0 => {
-                    // if return confirmed, mostrar datos de devolución
-                    // eliminamos la bicicleta del usuario
-
-                    // if return rejected, mostrar motivo
-                },
-                _ => println!("No response from station"),
-            }
-        }
-        Err(e) => println!("Failed to connect: {}", e),
-    }
-}
+mod client;
+mod models;
+use client::AppClient;
 
 fn main() {
+    let mut app = AppClient::new(99, vec!["127.0.0.1:8080".to_string()]); // Se me ocurrio hacerlo en archivo csv; se lea y sea random de ahi (FORMATO, id_servidor, ip, puerto)
+    let test_station_ip = "127.0.0.1:9000"; // yo lo estoy probando con el comando ns 127.0.0.1:8080 y mandandole mensajes que puede hacer la estación. Pero la misma idea que el servidor con el id de estacion, cant de bicis, etc (formato, id_estacion, ip, puerto, cantidad_bicis, cantidad_slots)
+    
     let mut input = String::new();
+    
+    println!("=== Bienvenido a BiciRed App (Usuario: {}) ===", app.user_id);
+    
     loop {
-        println!("Select: 1) Near stations 2) Rent 3) Return Bike 4) Quit");
+        println!("\n------------------------------------------------");
+        println!("1) Consultar Estaciones (CentralServer)");
+        println!("2) Alquilar Bicicleta (Station)");
+        println!("3) Devolver Bicicleta (Station)");
+        println!("4) Salir");
+        print!("> ");
+
         let _ = io::stdout().flush();
         input.clear();
         if io::stdin().read_line(&mut input).is_err() { 
-            println!("Error reading input");
+            println!("Error de lectura de consola");
             break; 
-        }
+        } 
+
         match input.trim() {
-            "1" => query_central(),
-            "2" => rent_station("127.0.0.1:9000"),
-            "3" => return_station("127.0.0.1:9000"),
-            "4" => { println!("Session ended"); break; }
-            other => println!("Unknown: {}", other),
+            "1" => app.query_central(Location { x: 10.0, y: 20.0 }, 5.0),
+            "2" => app.rent_station(test_station_ip, 0, "VISA_5555"), // Estaria bueno pedirle el token al iniciar la app o pedirselo cuando ejecuta esta acción ?
+            "3" => app.return_station(test_station_ip, 1),
+            "4" => { 
+                println!("Cerrando aplicación..."); 
+                break; 
+            },
+            other => println!("Opción desconocida: {}", other),
         }
     }
 }
