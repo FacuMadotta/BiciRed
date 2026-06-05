@@ -107,3 +107,5 @@ impl Handler<RequestMessage<ReturnRequest>> for StationActor {
         }
     }
 }
+
+// Conexion con central server 

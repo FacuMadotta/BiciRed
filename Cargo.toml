@@ -5,4 +5,5 @@ members = [
     "station",
     "central_server",
     "app",
+    "payment_service",
 ]

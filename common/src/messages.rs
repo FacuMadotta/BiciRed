@@ -88,3 +88,41 @@ pub struct ConnectionClosed;
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct NewConnectionMessage(pub std::net::TcpStream);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PreparePayment {
+    pub transaction_id: u64,
+    pub amount_cents: u32,
+    pub card_token: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct VoteCommit {
+    pub transaction_id: u64,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct VoteAbort {
+    pub transaction_id: u64,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CommitPayment {
+    pub transaction_id: u64,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CapturePayment {
+    pub transaction_id: u64,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RollbackPayment {
+    pub transaction_id: u64,
+}
