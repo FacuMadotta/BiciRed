@@ -18,3 +18,9 @@ pub struct StationStatus {
     pub free_slots: u8,
     pub updated_at_secs: u64,
 }
+
+#[derive(Debug, Clone)]
+pub struct ServerNode {
+    pub id: ServerId,
+    pub addr: String,
+}

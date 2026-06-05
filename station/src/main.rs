@@ -4,7 +4,7 @@ use actix::prelude::*;
 mod station;
 mod connection;
 use station::{StationActor, Station};
-use connection::ConnectionActor;
+use connection::{ConnectionActor, SpawnerActor};
 use common::*;
 
 #[actix::main]
@@ -18,10 +18,10 @@ async fn main() -> std::io::Result<()> {
     let ip = args[1].clone();
     let central_ip = &args[2];
 
-    println!("Station starting on {}", ip);
+    println!("Station iniciada en {}", ip);
 
     let central_socket = TcpStream::connect(central_ip)
-        .expect("Could not connect to Central Server");
+        .expect("Error conectando al servidor central");
 
     // Esto esta harcodeado inicialmente.
     let my_location = Location { x: 0.0, y: 0.0 }; 
@@ -29,13 +29,15 @@ async fn main() -> std::io::Result<()> {
     
     let station_addr = StationActor::new(station_data, central_socket).start();
 
+    let spawner = SpawnerActor { station_addr: station_addr.clone() }.start();
+
     Acceptor::new(ip, move |stream| {
-        println!("New connection accepted, spawning ConnectionActor");
-        ConnectionActor::new(stream, station_addr.clone()).start();
+        println!("Nueva conexión aceptada, levantando ConnectionActor");
+        spawner.do_send(NewConnectionMessage(stream));
     }).start();
 
-    println!("Station is running. Press Ctrl+C to stop.");
+    println!("Station iniciada. Presiona Ctrl+C para detener.");
     
-    futures::future::pending::<()>().await;
+    std::future::pending::<()>().await;
     Ok(())
 }

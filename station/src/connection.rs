@@ -1,6 +1,8 @@
 use actix::prelude::*;
 use common::*;
 use std::net::TcpStream;
+use std::io::{Read, Write};
+use crate::StationActor;
 
 // Actor que maneja la conexión con un cliente, recibiendo solicitudes, y enviando respuestas.
 pub struct ConnectionActor {
@@ -15,7 +17,7 @@ impl ConnectionActor {
 
     fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context) 
     where 
-        T: Deserializable + 'static,
+        T: Deserializable + 'static + Send,
         StationActor: Handler<RequestMessage<T>>,
     {
         let request_data = T::deserialize(message_text);
@@ -38,13 +40,35 @@ impl Actor for ConnectionActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        let _ = self.socket.set_nonblocking(true);
-        if let Ok(stream_clone) = self.socket.try_clone() {
-            ctx.add_stream(SocketStream(stream_clone)); // Se usa el stream para leer datos de la conexión sin bloquear el actor.
-        } else {
-            println!("Failed to clone socket for ConnectionActor");
-            ctx.stop();
-        }
+        let mut stream_clone = match self.socket.try_clone() {
+            Ok(s) => s,
+            Err(_e) => {
+                ctx.stop();
+                return;
+            }
+        };
+
+        let addr = ctx.address();
+        std::thread::spawn(move || {
+            let mut buffer = [0; 1024];
+            loop {
+                match stream_clone.read(&mut buffer) {
+                    Ok(0) => {
+                        addr.do_send(ConnectionClosed);
+                        break;
+                    }
+                    Ok(n) => {
+                        let data = buffer[..n].to_vec();
+                        addr.do_send(IncomingData(data));
+                    }
+                    Err(e) => {
+                        println!("Error leyendo del socket: {}", e);
+                        addr.do_send(ConnectionClosed);
+                        break;
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -57,29 +81,31 @@ impl<T> Message for RequestMessage<T> where T: Send + 'static {
     type Result = ();
 }
 
-impl StreamHandler<std::io::Result<Vec<u8>>> for ConnectionActor {
-    fn handle(&mut self, msg: std::io::Result<Vec<u8>>, _ctx: &mut Self::Context) {
-        match msg {
-            Ok(data) => {
-                if let Ok(text) = String::from_utf8(data) {
-                    let message_text = text.trim();
-                    let message_type = MessageType::deserialize(message_text);
-                    
-                    match message_type {
-                        MessageType::RentRequest => self.send_message::<RentRequest>(message_text, _ctx),
-                        MessageType::ReturnRequest => self.send_message::<ReturnRequest>(message_text, _ctx),
-                        _ => {
-                            println!("Unknown message type received: {}", message_text);
-                        }
-                    }
-                    
+impl Handler<IncomingData> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: IncomingData, ctx: &mut Self::Context) {
+        if let Ok(text) = String::from_utf8(msg.0) {
+            let message_text = text.trim();
+            let message_type = MessageType::deserialize(message_text);
+            
+            match message_type {
+                MessageType::RentRequest => self.send_message::<RentRequest>(message_text, ctx),
+                MessageType::ReturnRequest => self.send_message::<ReturnRequest>(message_text, ctx),
+                _ => {
+                    println!("Mensaje desconocido recibido: {}", message_text);
                 }
             }
-            Err(e) => {
-                println!("Error reading from socket: {}", e);
-                _ctx.stop();
-            }
         }
+    }
+}
+
+impl Handler<ConnectionClosed> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: ConnectionClosed, ctx: &mut Self::Context) {
+        println!("Cerrando conexión con cliente.");
+        ctx.stop();
     }
 }
 
@@ -112,5 +138,23 @@ impl Handler<ReturnRejected> for ConnectionActor {
 
     fn handle(&mut self, msg: ReturnRejected, _ctx: &mut Self::Context) {
         self.send_response(msg);
+    }
+}
+
+// Actor que permite levantar un nuevo ConnectionActor por cada nueva conexión entrante, recibiendo los sockets desde el Acceptor.
+pub struct SpawnerActor {
+    pub station_addr: Addr<StationActor>,
+}
+
+impl Actor for SpawnerActor {
+    type Context = Context<Self>;
+}
+
+impl Handler<NewConnectionMessage> for SpawnerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NewConnectionMessage, _ctx: &mut Self::Context) {
+        println!("Spawner recibiendo socket. Levantando ConnectionActor...");
+        ConnectionActor::new(msg.0, self.station_addr.clone()).start();
     }
 }
