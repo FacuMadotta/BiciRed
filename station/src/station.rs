@@ -2,6 +2,7 @@ use actix::prelude::*;
 use common::*;
 use std::net::TcpStream;
 use crate::connection::RequestMessage;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
@@ -34,10 +35,10 @@ impl Station {
         matches!(self.slots.get(slot_index).map(|s| &s.state), Some(SlotState::Occupied { .. }))
     }
 
-    fn unlock_bike(&mut self, slot_index: usize) -> Option<BikeId> {
+    fn reserve_bike(&mut self, slot_index: usize) -> Option<BikeId> {
         if let Some(slot) = self.slots.get_mut(slot_index) {
             if let SlotState::Occupied { bike_id } = slot.state {
-                slot.state = SlotState::Empty; // Marcar el slot como vacío
+                slot.state = SlotState::Reserved; // Marcar el slot como reservado antes de commit
                 return Some(bike_id);
             }
         } 
@@ -58,11 +59,19 @@ impl Station {
 pub struct StationActor {
     station: Station,
     central_server: TcpStream,
+    payment_service: TcpStream,
 }
 
 impl StationActor {
-    pub fn new(station: Station, central_server: TcpStream) -> Self {
-        Self { station, central_server }
+    pub fn new(station: Station, central_server: TcpStream, payment_service: TcpStream) -> Self {
+        Self { station, central_server, payment_service }
+    }
+
+    fn generate_rental_id(&self, bike_id: BikeId, user_id: UserId) -> String {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(n) => format!("{}-{}-{}", bike_id, user_id, n.as_secs()),
+            Err(_) => format!("{}-{}-{}", bike_id, user_id, 0), // fallback en caso de error
+        }
     }
 }
 
@@ -76,12 +85,25 @@ impl Handler<RequestMessage<RentRequest>> for StationActor {
     fn handle(&mut self, msg: RequestMessage<RentRequest>, _ctx: &mut Self::Context) {
         println!("StationActor recibiendo RentRequest para slot {}", msg.request.slot_index);
         if self.station.is_bike_available(msg.request.slot_index) { 
-            let bike_id = self.station.unlock_bike(msg.request.slot_index);
+            let bike_id = self.station.reserve_bike(msg.request.slot_index);
+            let rental_id = self.generate_rental_id(bike_id.expect("Bici debería estar disponible"), msg.request.user_id);
+            let prepare_msg = PreparePayment {
+                card_token: msg.request.card_token.clone(),
+                amount_cents: 100, // harcodeo inicial
+                transaction_id: rental_id,
+            };
+
+            self.payment_service.write(prepare_msg.serialize().as_bytes()).expect("Error enviando mensaje a Payment Service");
+            msg.response.do_send(prepare_msg); // Enviar el mensaje de prepare al ConnectionActor para que lo reenvíe al cliente (app)
+
+            // No va aca
             msg.response.do_send(RentConfirmed {
                 bike_id: bike_id.expect("Bici debería estar disponible"),
                 pre_auth_cents: 100, 
                 timestamp_secs: 0, // Harcodeo inicial 
+                rental_id: rental_id.clone(),
             });
+
         } else {
             msg.response.do_send(RentRejected {
                 reason: "Bici no disponible".to_string(),

@@ -17,6 +17,7 @@ pub struct ReturnRequest {
     pub bike_id: BikeId,
     pub slot_index: usize,
     pub started_at_secs: u64,
+    pub rental_id: String,
 }
 
 #[derive(Message)]
@@ -25,6 +26,7 @@ pub struct RentConfirmed {
     pub bike_id: BikeId,
     pub pre_auth_cents: u32,
     pub timestamp_secs: u64,
+    pub rental_id: String,
 }
 
 #[derive(Message)]
@@ -93,28 +95,28 @@ pub struct NewConnectionMessage(pub std::net::TcpStream);
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PreparePayment {
-    pub transaction_id: u64,
+    pub transaction_id: String,
     pub amount_cents: u32,
     pub card_token: String,
 }
 
 pub trait TransactionMessage {
-    fn new(id: u64) -> Self;
-    fn transaction_id(&self) -> u64;
+    fn new(id: String) -> Self;
+    fn transaction_id(&self) -> String;
     fn message_type() -> MessageType;
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct VoteCommit {
-    pub transaction_id: u64,
+    pub transaction_id: String,
 }
 
 impl TransactionMessage for VoteCommit {
-    fn new(id: u64) -> Self {
+    fn new(id: String) -> Self {
         Self { transaction_id: id }
     }
-    fn transaction_id(&self) -> u64 {
+    fn transaction_id(&self) -> String {
         self.transaction_id
     }
     fn message_type() -> MessageType {
@@ -125,14 +127,14 @@ impl TransactionMessage for VoteCommit {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct VoteAbort {
-    pub transaction_id: u64,
+    pub transaction_id: String,
 }
 
 impl TransactionMessage for VoteAbort {
-    fn new(id: u64) -> Self {
+    fn new(id: String) -> Self {
         Self { transaction_id: id }
     }
-    fn transaction_id(&self) -> u64 {
+    fn transaction_id(&self) -> String {
         self.transaction_id
     }
     fn message_type() -> MessageType {
@@ -143,14 +145,14 @@ impl TransactionMessage for VoteAbort {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct CommitPayment {
-    pub transaction_id: u64,
+    pub transaction_id: String,
 }
 
 impl TransactionMessage for CommitPayment {
-    fn new(id: u64) -> Self {
+    fn new(id: String) -> Self {
         Self { transaction_id: id }
     }
-    fn transaction_id(&self) -> u64 {
+    fn transaction_id(&self) -> String {
         self.transaction_id
     }
     fn message_type() -> MessageType {
@@ -161,14 +163,14 @@ impl TransactionMessage for CommitPayment {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct CapturePayment {
-    pub transaction_id: u64,
+    pub transaction_id: String,
 }
 
 impl TransactionMessage for CapturePayment {
-    fn new(id: u64) -> Self {
+    fn new(id: String) -> Self {
         Self { transaction_id: id }
     }
-    fn transaction_id(&self) -> u64 {
+    fn transaction_id(&self) -> String {
         self.transaction_id
     }
     fn message_type() -> MessageType {
@@ -179,14 +181,14 @@ impl TransactionMessage for CapturePayment {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct RollbackPayment {
-    pub transaction_id: u64,
+    pub transaction_id: String,
 }
 
 impl TransactionMessage for RollbackPayment {
-    fn new(id: u64) -> Self {
+    fn new(id: String) -> Self {
         Self { transaction_id: id }
     }
-    fn transaction_id(&self) -> u64 {
+    fn transaction_id(&self) -> String {
         self.transaction_id
     }
     fn message_type() -> MessageType {
