@@ -18,11 +18,24 @@ impl ConnectionActor {
         }
     }
 
-    fn send_response(&mut self, response_text: &str) {
-        let response_formatted = format!("{}\n", response_text);
-        if let Err(e) = self.socket.write_all(response_formatted.as_bytes()) {
-            println!("[BANK] Error escribiendo en socket: {}", e);
-        }
+    fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context) 
+    where 
+        T: Deserializable + 'static + Send,
+        PaymentServiceActor: Handler<RequestMessage<T>>,
+    {
+        let request_data = T::deserialize(message_text);
+        self.payment_service_addr.do_send(RequestMessage {
+            request: request_data,
+            response: ctx.address(),
+        });
+    }
+
+    fn send_response<T>(&mut self, response: T) 
+    where 
+        T: Serializable,
+    {
+        let response_text = response.serialize();
+        let _ = self.socket.write_all(response_text.as_bytes());
     }
 }
 
@@ -62,11 +75,53 @@ impl Actor for ConnectionActor {
     }
 }
 
+pub struct RequestMessage<T> {
+    pub request: T,
+    pub response: Addr<ConnectionActor>,
+}
+
+impl<T> Message for RequestMessage<T> where T: Send + 'static {
+    type Result = ();
+}
+
 impl Handler<IncomingData> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: IncomingData, ctx: &mut Self::Context) {
-        // Falta definir
+        if let Ok(text) = String::from_utf8(msg.0) {
+            let message_text = text.trim();
+            let message_type = MessageType::deserialize(message_text);
+            
+            match message_type {
+                MessageType::Prepare => self.send_message::<Prepare>(message_text, ctx),
+                MessageType::VoteCommit => self.send_message::<VoteCommit>(message_text, ctx),
+                MessageType::VoteAbort => self.send_message::<VoteAbort>(message_text, ctx),
+                MessageType::CommitPayment => self.send_message::<CommitPayment>(message_text, ctx),
+                MessageType::CapturePayment => self.send_message::<CapturePayment>(message_text, ctx),
+                MessageType::RollbackPayment => self.send_message::<RollbackPayment>(message_text, ctx),
+                _ => {
+                    println!("Mensaje desconocido recibido: {}", message_text);
+                }
+            }
+        }
+    }
+}
+
+impl Handler<VoteCommit> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: VoteCommit, _ctx: &mut Self::Context) {
+        println!("[BANK] Enviando VoteCommit para transaction_id {}", msg.transaction_id());
+        self.send_response(msg);
+    }
+}
+
+impl Handler<VoteAbort> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: VoteAbort, _ctx: &mut Self::Context) {
+        println!("[BANK] Enviando VoteAbort para transaction_id {}", msg.transaction_id());
+        self.send_response(msg);
     }
 }
 
@@ -96,3 +151,4 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
         ConnectionActor::new(msg.0, self.payment_service_addr.clone()).start();
     }
 }
+
