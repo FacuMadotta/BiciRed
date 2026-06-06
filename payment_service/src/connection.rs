@@ -93,9 +93,7 @@ impl Handler<IncomingData> for ConnectionActor {
             let message_type = MessageType::deserialize(message_text);
             
             match message_type {
-                MessageType::Prepare => self.send_message::<Prepare>(message_text, ctx),
-                MessageType::VoteCommit => self.send_message::<VoteCommit>(message_text, ctx),
-                MessageType::VoteAbort => self.send_message::<VoteAbort>(message_text, ctx),
+                MessageType::PreparePayment => self.send_message::<PreparePayment>(message_text, ctx),
                 MessageType::CommitPayment => self.send_message::<CommitPayment>(message_text, ctx),
                 MessageType::CapturePayment => self.send_message::<CapturePayment>(message_text, ctx),
                 MessageType::RollbackPayment => self.send_message::<RollbackPayment>(message_text, ctx),

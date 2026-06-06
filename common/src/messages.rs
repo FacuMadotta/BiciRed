@@ -1,5 +1,6 @@
 use crate::entities::*;
 use actix::prelude::*;
+use crate::message_types::MessageType;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -100,6 +101,7 @@ pub struct PreparePayment {
 pub trait TransactionMessage {
     fn new(id: u64) -> Self;
     fn transaction_id(&self) -> u64;
+    fn message_type() -> MessageType;
 }
 
 #[derive(Message)]
@@ -114,6 +116,9 @@ impl TransactionMessage for VoteCommit {
     }
     fn transaction_id(&self) -> u64 {
         self.transaction_id
+    }
+    fn message_type() -> MessageType {
+        MessageType::VoteCommit
     }
 }
 
@@ -130,6 +135,9 @@ impl TransactionMessage for VoteAbort {
     fn transaction_id(&self) -> u64 {
         self.transaction_id
     }
+    fn message_type() -> MessageType {
+        MessageType::VoteAbort
+    }
 }
 
 #[derive(Message)]
@@ -144,6 +152,9 @@ impl TransactionMessage for CommitPayment {
     }
     fn transaction_id(&self) -> u64 {
         self.transaction_id
+    }
+    fn message_type() -> MessageType {
+        MessageType::CommitPayment
     }
 }
 
@@ -160,6 +171,9 @@ impl TransactionMessage for CapturePayment {
     fn transaction_id(&self) -> u64 {
         self.transaction_id
     }
+    fn message_type() -> MessageType {
+        MessageType::CapturePayment
+    }
 }
 
 #[derive(Message)]
@@ -174,5 +188,8 @@ impl TransactionMessage for RollbackPayment {
     }
     fn transaction_id(&self) -> u64 {
         self.transaction_id
+    }
+    fn message_type() -> MessageType {
+        MessageType::RollbackPayment
     }
 }

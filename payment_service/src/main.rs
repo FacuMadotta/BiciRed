@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::env;
-use std::io::{Read, Write};
 use actix::prelude::*;
 use common::{Acceptor, NewConnectionMessage};
+mod connection;
+mod service;
+use connection::{SpawnerActor};
+use service::PaymentServiceActor;
 
 
 #[actix::main]

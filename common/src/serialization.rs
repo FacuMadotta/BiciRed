@@ -155,7 +155,7 @@ impl Serializable for StationStatus {
 impl Serializable for PreparePayment {
     fn serialize(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}",
             MessageType::PreparePayment.as_str(),
             self.transaction_id,
             self.amount_cents,
@@ -168,7 +168,7 @@ impl<T: TransactionMessage> Serializable for T {
     fn serialize(&self) -> String {
         format!(
             "{}|{}",
-            MessageType::from_transaction_message(self).as_str(),
+            T::message_type().as_str(),
             self.transaction_id()
         )
     }

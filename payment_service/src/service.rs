@@ -1,7 +1,9 @@
 use actix::prelude::*;
-use std::io::{Read, Write};
 use common::*;
+use crate::HashMap;
+use crate::connection::RequestMessage;
 
+#[derive(PartialEq, Debug, Clone)]
 pub enum TransactionStatus {
     PreAuthorized, // Estado inicial
     Commited, // Transaccion aceptada, pero no se cobra aun
