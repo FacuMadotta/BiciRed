@@ -28,12 +28,13 @@ impl Deserializable for RentRequest {
 impl Deserializable for ReturnRequest {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();
-        assert!(parts.len() == 5);
+        assert!(parts.len() == 6);
         Self {
             user_id: parts[1].parse().expect("Invalid user_id"),
             bike_id: parts[2].parse().expect("Invalid bike_id"),
             slot_index: parts[3].parse().expect("Invalid slot_index"),
             started_at_secs: parts[4].parse().expect("Invalid started_at_secs"),
+            rental_id: parts[5].to_string(),
         }
     }
 }
@@ -41,11 +42,12 @@ impl Deserializable for ReturnRequest {
 impl Deserializable for RentConfirmed {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();
-        assert!(parts.len() == 4);
+        assert!(parts.len() == 5);
         Self {
             bike_id: parts[1].parse().expect("Invalid bike_id"),
             pre_auth_cents: parts[2].parse().expect("Invalid pre_auth_cents"),
             timestamp_secs: parts[3].parse().expect("Invalid timestamp_secs"),
+            rental_id: parts[4].to_string(),
         }
     }
 }

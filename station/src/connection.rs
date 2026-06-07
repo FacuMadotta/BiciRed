@@ -92,6 +92,8 @@ impl Handler<IncomingData> for ConnectionActor {
             match message_type {
                 MessageType::RentRequest => self.send_message::<RentRequest>(message_text, ctx),
                 MessageType::ReturnRequest => self.send_message::<ReturnRequest>(message_text, ctx),
+                MessageType::VoteCommit => self.send_message::<VoteCommit>(message_text, ctx),
+                MessageType::VoteAbort => self.send_message::<VoteAbort>(message_text, ctx),
                 _ => {
                     println!("Mensaje desconocido recibido: {}", message_text);
                 }
@@ -137,6 +139,15 @@ impl Handler<ReturnRejected> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: ReturnRejected, _ctx: &mut Self::Context) {
+        self.send_response(msg);
+    }
+}
+
+// Mensajes de 2PC
+impl Handler<PreparePayment> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PreparePayment, _ctx: &mut Self::Context) {
         self.send_response(msg);
     }
 }

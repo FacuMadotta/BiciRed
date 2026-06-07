@@ -19,7 +19,7 @@ impl Serializable for RentRequest {
             MessageType::RentRequest.as_str(),
             self.user_id,
             self.slot_index,
-            self.card_token
+            self.card_token,
         )
     }
 }
@@ -27,12 +27,13 @@ impl Serializable for RentRequest {
 impl Serializable for ReturnRequest {
     fn serialize(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}",
             MessageType::ReturnRequest.as_str(),
             self.user_id,
             self.bike_id,
             self.slot_index,
-            self.started_at_secs
+            self.started_at_secs,
+            self.rental_id
         )
     }
 }
@@ -40,11 +41,12 @@ impl Serializable for ReturnRequest {
 impl Serializable for RentConfirmed {
     fn serialize(&self) -> String {
         format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             MessageType::RentConfirmed.as_str(),
             self.bike_id,
             self.pre_auth_cents,
-            self.timestamp_secs
+            self.timestamp_secs,
+            self.rental_id
         )
     }
 }

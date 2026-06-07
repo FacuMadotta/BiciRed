@@ -18,7 +18,7 @@ pub struct Transaction {
 }
 
 pub struct PaymentServiceActor {
-    pub transactions: HashMap<u64, Transaction>,
+    pub transactions: HashMap<String, Transaction>,
     pub cards: HashMap<String, u32>, // Mapa de card_token a saldo disponible en pesos
 }
 
@@ -66,7 +66,7 @@ impl Handler<RequestMessage<PreparePayment>> for PaymentServiceActor {
         if let Some(saldo) = self.cards.get_mut(card_token) {
             if *saldo >= amount {
                 *saldo -= amount; 
-                self.transactions.insert(msg.request.transaction_id, Transaction {
+                self.transactions.insert(msg.request.transaction_id.clone(), Transaction {
                     card_token: card_token.clone(),
                     amount_cents: amount,
                     status: TransactionStatus::PreAuthorized,

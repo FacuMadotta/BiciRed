@@ -117,7 +117,7 @@ impl TransactionMessage for VoteCommit {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id
+        self.transaction_id.clone()
     }
     fn message_type() -> MessageType {
         MessageType::VoteCommit
@@ -135,7 +135,7 @@ impl TransactionMessage for VoteAbort {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id
+        self.transaction_id.clone()
     }
     fn message_type() -> MessageType {
         MessageType::VoteAbort
@@ -153,7 +153,7 @@ impl TransactionMessage for CommitPayment {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id
+        self.transaction_id.clone()
     }
     fn message_type() -> MessageType {
         MessageType::CommitPayment
@@ -171,7 +171,7 @@ impl TransactionMessage for CapturePayment {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id
+        self.transaction_id.clone()
     }
     fn message_type() -> MessageType {
         MessageType::CapturePayment
@@ -189,7 +189,7 @@ impl TransactionMessage for RollbackPayment {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id
+        self.transaction_id.clone() 
     }
     fn message_type() -> MessageType {
         MessageType::RollbackPayment
