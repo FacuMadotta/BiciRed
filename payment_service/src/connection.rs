@@ -21,7 +21,7 @@ impl ConnectionActor {
     fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context) 
     where 
         T: Deserializable + 'static + Send,
-        PaymentServiceActor: Handler<RequestMessage<T>>,
+        PaymentServiceActor: Handler<RequestMessage<T, ConnectionActor>>,
     {
         let request_data = T::deserialize(message_text);
         self.payment_service_addr.do_send(RequestMessage {
@@ -73,15 +73,6 @@ impl Actor for ConnectionActor {
             }
         });
     }
-}
-
-pub struct RequestMessage<T> {
-    pub request: T,
-    pub response: Addr<ConnectionActor>,
-}
-
-impl<T> Message for RequestMessage<T> where T: Send + 'static {
-    type Result = ();
 }
 
 impl Handler<IncomingData> for ConnectionActor {

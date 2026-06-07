@@ -1,7 +1,6 @@
 use actix::prelude::*;
 use common::*;
 use std::net::TcpStream;
-use crate::connection::RequestMessage;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
@@ -128,10 +127,10 @@ impl Actor for StationActor {
     type Context = Context<Self>;
 }
 
-impl Handler<RequestMessage<RentRequest>> for StationActor {
+impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<RentRequest>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<RentRequest, ConnectionActor>, _ctx: &mut Self::Context) {
         println!("StationActor recibiendo RentRequest para slot {}", msg.request.slot_index);
         if self.station.is_bike_available(msg.request.slot_index) { 
             let bike_id = self.station.reserve_bike(msg.request.slot_index);
@@ -164,10 +163,10 @@ impl Handler<RequestMessage<RentRequest>> for StationActor {
     }   
 }
 
-impl Handler<RequestMessage<ReturnRequest>> for StationActor {
+impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<ReturnRequest>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<ReturnRequest, ConnectionActor>, _ctx: &mut Self::Context) {
         let slot = msg.request.slot_index;
         let bike_id = msg.request.bike_id;
         let rental_id = msg.request.rental_id.clone();
@@ -195,20 +194,20 @@ impl Handler<RequestMessage<ReturnRequest>> for StationActor {
 
 // Mensaje para 2PC
 // Mensajes que recibe de la App
-impl Handler<RequestMessage<VoteCommit>> for StationActor {
+impl Handler<RequestMessage<VoteCommit, ConnectionActor>> for StationActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<VoteCommit>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<VoteCommit, ConnectionActor>, _ctx: &mut Self::Context) {
         self.pending_transactions.entry(msg.request.transaction_id.clone())
             .and_modify(|tx| tx.central_voted_commit = true);
         self.check_transaction_state(&msg.request.transaction_id);
     }
 }
 
-impl Handler<RequestMessage<VoteAbort>> for StationActor {
+impl Handler<RequestMessage<VoteAbort, ConnectionActor>> for StationActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<VoteAbort>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<VoteAbort, ConnectionActor>, _ctx: &mut Self::Context) {
         let rollback_msg = RollbackPayment {
             transaction_id: msg.request.transaction_id.clone(),
         };

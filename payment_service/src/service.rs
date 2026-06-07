@@ -1,7 +1,7 @@
 use actix::prelude::*;
 use common::*;
 use crate::HashMap;
-use crate::connection::RequestMessage;
+use crate::connection::ConnectionActor;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum TransactionStatus {
@@ -41,10 +41,10 @@ impl Actor for PaymentServiceActor {
 }
 
 // Handlers de mensajes
-impl Handler<RequestMessage<PreparePayment>> for PaymentServiceActor {
+impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<PreparePayment>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<PreparePayment, ConnectionActor>, _ctx: &mut Self::Context) {
         println!("[BANK] Recibiendo PreparePayment para transaction_id {}", msg.request.transaction_id);
         if self.transactions.contains_key(&msg.request.transaction_id) {
             if let Some(transaction) = self.transactions.get(&msg.request.transaction_id) {
@@ -79,10 +79,10 @@ impl Handler<RequestMessage<PreparePayment>> for PaymentServiceActor {
     }
 }
 
-impl Handler<RequestMessage<CommitPayment>> for PaymentServiceActor {
+impl Handler<RequestMessage<CommitPayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<CommitPayment>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<CommitPayment, ConnectionActor>, _ctx: &mut Self::Context) {
         println!("[BANK] Recibiendo CommitPayment para transaction_id {}", msg.request.transaction_id);
         if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
             if transaction.status == TransactionStatus::PreAuthorized {
@@ -92,10 +92,10 @@ impl Handler<RequestMessage<CommitPayment>> for PaymentServiceActor {
     }
 }
 
-impl Handler<RequestMessage<RollbackPayment>> for PaymentServiceActor {
+impl Handler<RequestMessage<RollbackPayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<RollbackPayment>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<RollbackPayment, ConnectionActor>, _ctx: &mut Self::Context) {
         println!("[BANK] Recibiendo RollbackPayment para transaction_id {}", msg.request.transaction_id);
         if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
             if transaction.status == TransactionStatus::PreAuthorized {
@@ -108,10 +108,10 @@ impl Handler<RequestMessage<RollbackPayment>> for PaymentServiceActor {
     }
 }
 
-impl Handler<RequestMessage<CapturePayment>> for PaymentServiceActor {
+impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
-    fn handle(&mut self, msg: RequestMessage<CapturePayment>, _ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: RequestMessage<CapturePayment, ConnectionActor>, _ctx: &mut Self::Context) {
         println!("[BANK] Recibiendo CapturePayment para transaction_id {}", msg.request.transaction_id);
         if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
             if transaction.status == TransactionStatus::Commited {

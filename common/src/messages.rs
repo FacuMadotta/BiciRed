@@ -195,3 +195,16 @@ impl TransactionMessage for RollbackPayment {
         MessageType::RollbackPayment
     }
 }
+
+pub struct RequestMessage<T, A: actix::Actor> {
+    pub request: T,
+    pub response: actix::Addr<A>,
+}
+
+impl<T, A> Message for RequestMessage<T, A> 
+where 
+    T: Send + 'static,
+    A: actix::Actor
+{
+    type Result = ();
+}
