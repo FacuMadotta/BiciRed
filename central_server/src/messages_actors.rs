@@ -1,7 +1,7 @@
 use actix::prelude::*;
 use common::*;
 use crate::actors::ConnectionActor;
-
+use crate::actors::ElectorActor;
 // Connection --> Central
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
@@ -12,7 +12,7 @@ pub struct StationUpdateMessage {
 // Connection --> Election
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
-pub struct LeaderAliveMessage{
+pub struct LeaderAliveMessage {
     pub leader_id: ServerId,
 }
 
@@ -29,6 +29,13 @@ pub struct LeaderElectionMessage {
 pub struct RegisterPeerConnectionMessage {
     pub server_id: ServerId,
     pub connection_addr: Addr<ConnectionActor>,
+}
+
+// Connection --> Election
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")] 
+pub struct RemovePeerMessage {
+    pub server_id: ServerId,
 }
 
 // Connection --> Election
@@ -85,3 +92,17 @@ pub struct IncomingData(pub Vec<u8>);
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct NewConnectionMessage(pub std::net::TcpStream);
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct PeerConnectedMessage {
+    pub peer_id: ServerId,
+    pub peer_addr: String,
+    pub socket: std::net::TcpStream,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct RegisterElectionActor {
+    pub elector_addr: Addr<ElectorActor>,
+}

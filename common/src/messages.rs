@@ -56,7 +56,9 @@ pub struct StationUpdate {
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct IsAlive;
+pub struct IsAlive {
+    pub leader_id: ServerId,
+}
 
 #[derive(Message)]
 #[rtype(result = "()")]

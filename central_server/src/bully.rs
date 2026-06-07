@@ -77,7 +77,9 @@ impl ElectorActor {
 
     pub fn send_alive_to_peers(&self) {
         for addr in self.peer_servers.values() {
-            addr.do_send(LeaderAliveMessage { leader_id: self.server_id });
+            addr.do_send(LeaderAliveMessage {
+                leader_id: self.server_id,
+            });
         }
     }
 }
@@ -86,9 +88,8 @@ impl Handler<LeaderAliveMessage> for ElectorActor {
     type Result = ();
 
     fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        if Some(msg.leader_id) == self.leader_id {
-            self.reset_leader_timeout();
-        }
+        self.leader_id = Some(msg.leader_id);
+        self.reset_leader_timeout();
     }
 }
 

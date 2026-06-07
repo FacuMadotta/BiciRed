@@ -94,8 +94,12 @@ impl Deserializable for StationUpdate {
 }
 
 impl Deserializable for IsAlive {
-    fn deserialize(_input: &str) -> Self {
-        Self
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 2);
+        Self {
+            leader_id: parts[1].parse().expect("Invalid leader_id"),
+        }
     }
 }
 

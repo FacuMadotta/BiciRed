@@ -94,7 +94,11 @@ impl Serializable for StationUpdate {
 
 impl Serializable for IsAlive {
     fn serialize(&self) -> String {
-        MessageType::IsAlive.serialize()
+        format!(
+            "{}|{}",
+            MessageType::IsAlive.as_str(),
+            self.leader_id
+        )
     }
 }
 

@@ -6,19 +6,44 @@ use std::io::Write;
 use crate::messages_actors::*;
 use std::io::Read;
 use std::time::Instant;
+use std::thread;
+use std::time::Duration;
 use crate::messages_actors::IncomingData;
 use crate::messages_actors::NewConnectionMessage;
 
 pub struct ConnectionActor {
     pub server_id: ServerId,
+    pub peer_id: Option<ServerId>,
+    pub peer_addr: Option<String>,
+    pub reconnect_on_stop: bool,
     pub socket: TcpStream,
     pub server_addr: Addr<CentralServerActor>,
     pub elector_addr: Addr<ElectorActor>,
 }
 
 impl ConnectionActor {
-    pub fn new(server_id: ServerId, socket: TcpStream, server: Addr<CentralServerActor>, elector: Addr<ElectorActor>) -> Self {
-        Self { server_id, socket, server_addr: server, elector_addr: elector }
+    pub fn new_incoming(server_id: ServerId, socket: TcpStream, server: Addr<CentralServerActor>, elector: Addr<ElectorActor>) -> Self {
+        Self {
+            server_id,
+            peer_id: None,
+            peer_addr: None,
+            reconnect_on_stop: false,
+            socket,
+            server_addr: server,
+            elector_addr: elector,
+        }
+    }
+
+    pub fn new_outgoing(server_id: ServerId, peer_id: ServerId, peer_addr: String, socket: TcpStream, server: Addr<CentralServerActor>, elector: Addr<ElectorActor>) -> Self {
+        Self {
+            server_id,
+            peer_id: Some(peer_id),
+            peer_addr: Some(peer_addr),
+            reconnect_on_stop: true,
+            socket,
+            server_addr: server,
+            elector_addr: elector,
+        }
     }
 }
 
@@ -37,6 +62,7 @@ impl Actor for ConnectionActor {
                 while let Ok(n) = stream_clone.read(&mut buf) {
                     if n == 0 { 
                         println!("[SERVER] El cliente cerró la conexión.");
+                        addr.do_send(ConnectionClosed);
                         break; 
                     }
                     addr.do_send(IncomingData(buf[..n].to_vec()));
@@ -46,6 +72,46 @@ impl Actor for ConnectionActor {
             println!("[SERVER] Error al clonar socket para ConnectionActor");
             ctx.stop();
         }
+    }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        if let Some(peer_id) = self.peer_id {
+            self.elector_addr.do_send(RemovePeerMessage { server_id: peer_id });
+            self.server_addr.do_send(RemovePeerMessage { server_id: peer_id });
+        }
+
+        if !self.reconnect_on_stop {
+            return;
+        }
+
+        let Some(peer_addr) = self.peer_addr.clone() else {
+            return;
+        };
+
+        let peer_id = self.peer_id;
+        let server_addr = self.server_addr.clone();
+
+        thread::spawn(move || {
+            loop {
+                match TcpStream::connect(&peer_addr) {
+                    Ok(socket) => {
+                        if let Some(target_peer_id) = peer_id {
+                            println!("[ELECTION] Reconectado con peer {} en {}", target_peer_id, peer_addr);
+                            server_addr.do_send(PeerConnectedMessage {
+                                peer_id: target_peer_id,
+                                peer_addr: peer_addr.clone(),
+                                socket,
+                            });
+                        }
+                        break;
+                    }
+                    Err(err) => {
+                        eprintln!("[ELECTION] Reintentando conexión con {}: {}", peer_addr, err);
+                        thread::sleep(Duration::from_secs(1));
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -64,10 +130,13 @@ impl Handler<IncomingData> for ConnectionActor {
                     "HELLO" => {
                         if parts.len() == 2 {
                             if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                                self.elector_addr.do_send(RegisterPeerConnectionMessage {
+                                let msg = RegisterPeerConnectionMessage {
                                     server_id,
                                     connection_addr: ctx.address(),
-                                });
+                                };
+                                self.elector_addr.do_send(msg.clone());
+                                self.server_addr.do_send(msg);
+                                self.peer_id = Some(server_id);
                             }
                         }
                     }
@@ -78,11 +147,8 @@ impl Handler<IncomingData> for ConnectionActor {
                         });
                     }
                     "IS_ALIVE" => {
-                        if parts.len() == 2 {
-                            if let Ok(leader_id) = parts[1].parse::<ServerId>() {
-                                self.elector_addr.do_send(LeaderAliveMessage { leader_id });
-                            }
-                        }
+                        let is_alive = IsAlive::deserialize(message_text);
+                        self.elector_addr.do_send(LeaderAliveMessage { leader_id: is_alive.leader_id });
                     }
                     "ELECTION_ACK" | "ACK" => {
                         self.elector_addr.do_send(ElectionAckMessage);
@@ -137,6 +203,14 @@ impl Handler<NearbyStationsResponseMessage> for ConnectionActor {
     }
 }
 
+impl Handler<ConnectionClosed> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: ConnectionClosed, ctx: &mut Self::Context) {
+        ctx.stop();
+    }
+}
+
 impl Handler<RegisterPeerConnectionMessage> for ElectorActor {
     type Result = ();
 
@@ -145,12 +219,19 @@ impl Handler<RegisterPeerConnectionMessage> for ElectorActor {
     }
 }
 
+impl Handler<RemovePeerMessage> for ElectorActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemovePeerMessage, _ctx: &mut Self::Context) {
+        self.peer_servers.remove(&msg.server_id);
+    }
+}
+
 impl Handler<LeaderAliveMessage> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, _msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        let alive_msg = format!("IS_ALIVE|{}\n", self.server_id);
-        let _ = self.socket.write_all(alive_msg.as_bytes());
+        let _ = self.socket.write_all(b"IS_ALIVE\n");
     }
 }
 
@@ -181,12 +262,20 @@ impl Handler<SendCoordinatorMessage> for ConnectionActor {
 }
 
 pub struct CentralServerActor {
+    pub server_id: ServerId,
     pub station_table: HashMap<StationId, StationStatus>,
+    pub peers: HashMap<ServerId, Addr<ConnectionActor>>,
+    pub elector_addr: Option<Addr<ElectorActor>>,
 }
 
 impl CentralServerActor {
-    pub fn new() -> Self {
-        Self { station_table: HashMap::new() }
+    pub fn new(server_id: ServerId) -> Self {
+        Self {
+            server_id,
+            station_table: HashMap::new(),
+            peers: HashMap::new(),
+            elector_addr: None,
+        }
     }
 }
 
@@ -277,6 +366,6 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
 
     fn handle(&mut self, msg: NewConnectionMessage, _ctx: &mut Self::Context) {
         println!("[SERVER] Spawner recibiendo socket. Levantando ConnectionActor...");
-        ConnectionActor::new(self.server_id, msg.0, self.server_addr.clone(), self.elector_addr.clone()).start();
+        ConnectionActor::new_incoming(self.server_id, msg.0, self.server_addr.clone(), self.elector_addr.clone()).start();
     }
 }

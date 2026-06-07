@@ -5,13 +5,14 @@ use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
 
+mod server;
 mod bully;
 mod actors;
 mod messages_actors;
 
-use actors::{CentralServerActor, ConnectionActor, ElectorActor, SpawnerActor};
+use actors::{CentralServerActor, ElectorActor, SpawnerActor};
 use common::ServerId;
-use messages_actors::{NewConnectionMessage, RegisterPeerConnectionMessage};
+use messages_actors::{NewConnectionMessage, RegisterElectionActor, PeerConnectedMessage};
 
 #[actix::main]
 async fn main() -> std::io::Result<()> {
@@ -41,8 +42,9 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let server_addr = CentralServerActor::new().start();
+    let server_addr = CentralServerActor::new(server_id).start();
     let elector_addr = ElectorActor::new(server_id, server_addr.clone()).start();
+    server_addr.do_send(RegisterElectionActor { elector_addr: elector_addr.clone() });
 
     let spawner_addr = SpawnerActor {
         server_id,
@@ -50,18 +52,17 @@ async fn main() -> std::io::Result<()> {
         elector_addr: elector_addr.clone(),
     }.start();
 
-    for peer in server_nodes.into_iter().filter(|node| node.addr != ip) {
+    for peer in server_nodes.into_iter().filter(|node| node.id > server_id && node.addr != ip) {
         let server_addr = server_addr.clone();
-        let elector_addr = elector_addr.clone();
         thread::spawn(move || {
             loop {
                 match TcpStream::connect(&peer.addr) {
                     Ok(socket) => {
                         println!("[ELECTION] Conectado al peer {} en {}", peer.id, peer.addr);
-                        let connection_addr = ConnectionActor::new(server_id, socket, server_addr.clone(), elector_addr.clone()).start();
-                        elector_addr.do_send(RegisterPeerConnectionMessage {
-                            server_id: peer.id,
-                            connection_addr,
+                        server_addr.do_send(PeerConnectedMessage {
+                        peer_id: peer.id,
+                        peer_addr: peer.addr.clone(),
+                        socket
                         });
                         break;
                     }
