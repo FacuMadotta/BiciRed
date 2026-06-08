@@ -55,7 +55,15 @@ fn main() {
 
         match input.trim() {
             "1" => app.query_central(Location { x: 10.0, y: 20.0 }, 5.0),
-            "2" => app.rent_station(test_station_ip, 0, "VISA_5555"), // Estaria bueno pedirle el token al iniciar la app o pedirselo cuando ejecuta esta acción ?
+            "2" => {
+                let mut card_input = String::new();
+
+                print!("> Ingresá tu token de tarjeta: ");
+                io::stdout().flush().unwrap();
+                io::stdin().read_line(&mut card_input).unwrap();
+
+                app.rent_station(test_station_ip, 0, card_input.trim());
+            },
             "3" => app.return_station(test_station_ip, 1),
             "4" => { 
                 println!("Cerrando aplicación..."); 
