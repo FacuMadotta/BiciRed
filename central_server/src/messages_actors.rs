@@ -7,6 +7,7 @@ use common::*;
 #[rtype(result = "()")]
 pub struct StationUpdateMessage {
     pub station: StationStatus,
+    pub response_addr: Addr<ConnectionActor>,
 }
 
 // Connection --> Election
@@ -29,6 +30,7 @@ pub struct LeaderElectionMessage {
 pub struct RegisterPeerConnectionMessage {
     pub server_id: ServerId,
     pub connection_addr: Addr<ConnectionActor>,
+    pub peer_addr: Option<String>,
 }
 
 // Connection --> Election
@@ -105,4 +107,26 @@ pub struct PeerConnectedMessage {
 #[rtype(result = "()")]
 pub struct RegisterElectionActor {
     pub elector_addr: Addr<ElectorActor>,
+}
+
+// Election --> Central
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct RoleUpdateMessage {
+    pub is_leader: bool,
+    pub leader_id: Option<ServerId>,
+}
+
+// Central --> Connection
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct RejectNotLeaderMessage {
+    pub leader_addr: String,
+}
+
+// Central --> Connection
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct RejectNotReplicaMessage {
+    pub replica_addr: String,
 }

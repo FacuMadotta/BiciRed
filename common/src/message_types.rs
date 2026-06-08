@@ -20,6 +20,7 @@ pub enum MessageType {
     RollbackPayment,
     NotReplica,
     Prepare,
+    NotLeader
 }
 
 impl MessageType {
@@ -45,6 +46,7 @@ impl MessageType {
             Self::RollbackPayment => "ROLLBACK_PAYMENT",
             Self::NotReplica => "NOT_REPLICA",
             Self::Prepare => "PREPARE",
+            Self::NotLeader => "NOT_LEADER",
         }
     }
 
@@ -68,6 +70,9 @@ impl MessageType {
             "COMMIT_PAYMENT" => Some(Self::CommitPayment),
             "CAPTURE_PAYMENT" => Some(Self::CapturePayment),
             "ROLLBACK_PAYMENT" => Some(Self::RollbackPayment),
+            "NOT_REPLICA" => Some(Self::NotReplica),
+            "PREPARE" => Some(Self::Prepare),
+            "NOT_LEADER" => Some(Self::NotLeader),
             _ => None,
         }
     }

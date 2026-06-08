@@ -63,8 +63,10 @@ impl Actor for ConnectionActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        let hello_msg = format!("HELLO|{}\n", self.server_id);
-        let _ = self.socket.write_all(hello_msg.as_bytes());
+        if self.peer_id.is_some() {
+            let hello_msg = format!("HELLO|{}\n", self.server_id);
+            let _ = self.socket.write_all(hello_msg.as_bytes());
+        }
 
         if let Ok(mut stream_clone) = self.socket.try_clone() {
             let addr = ctx.address();
@@ -138,83 +140,90 @@ impl Handler<IncomingData> for ConnectionActor {
 
     fn handle(&mut self, msg: IncomingData, ctx: &mut Self::Context) {
         if let Ok(text) = String::from_utf8(msg.0) {
-            let message_text = text.trim();
-            if message_text.is_empty() {
-                return;
-            }
+            for line in text.lines() {
+                let message_text = line.trim();
+                if message_text.is_empty() {
+                    continue;
+                }
 
-            let parts: Vec<&str> = message_text.split('|').collect();
-            if parts.is_empty() {
-                return;
-            }
+                let parts: Vec<&str> = message_text.split('|').collect();
+                if parts.is_empty() {
+                    continue;
+                }
 
-            match parts[0] {
-                "HELLO" => {
-                    if parts.len() == 2 {
-                        if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                            let msg = RegisterPeerConnectionMessage {
-                                server_id,
-                                connection_addr: ctx.address(),
-                            };
-                            self.elector_addr.do_send(msg.clone());
-                            self.server_addr.do_send(msg);
-                            self.peer_id = Some(server_id);
+                match parts[0] {
+                    "HELLO" => {
+                        if parts.len() == 2 {
+                            if let Ok(server_id) = parts[1].parse::<ServerId>() {
+                                let ip_addr = self.socket.peer_addr().map(|addr| addr.to_string()).ok();
+                                let msg = RegisterPeerConnectionMessage {
+                                    server_id,
+                                    connection_addr: ctx.address(),
+                                    peer_addr: ip_addr,
+                                };
+                                self.elector_addr.do_send(msg.clone());
+                                self.server_addr.do_send(msg);
+                                self.peer_id = Some(server_id);
+                            }
                         }
                     }
-                }
-                "STATION_UPDATE" => {
-                    let update = StationUpdate::deserialize(message_text);
-                    self.server_addr.do_send(StationUpdateMessage {
-                        station: update.station,
-                    });
-                }
-                "IS_ALIVE" => {
-                    let is_alive = IsAlive::deserialize(message_text);
-                    self.elector_addr.do_send(LeaderAliveMessage {
-                        leader_id: is_alive.leader_id,
-                    });
-                }
-                "ELECTION_ACK" | "ACK" => {
-                    self.elector_addr.do_send(ElectionAckMessage);
-                }
-                "ELECTION" => {
-                    if parts.len() == 2 {
-                        if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                            self.elector_addr.do_send(RegisterPeerConnectionMessage {
-                                server_id,
-                                connection_addr: ctx.address(),
-                            });
-                            self.elector_addr
-                                .do_send(LeaderElectionMessage { server_id });
-                        }
-                    }
-                }
-                "COORDINATOR" => {
-                    if parts.len() == 2 {
-                        if let Ok(leader_id) = parts[1].parse::<ServerId>() {
-                            self.elector_addr
-                                .do_send(LeaderAnnouncementMessage { leader_id });
-                        }
-                    }
-                }
-                "NEARBY_QUERY" => {
-                    if parts.len() == 4 {
-                        let x: f64 = parts[1].parse().unwrap_or(0.0);
-                        let y: f64 = parts[2].parse().unwrap_or(0.0);
-                        let radius: f64 = parts[3].parse().unwrap_or(0.0);
-
-                        self.server_addr.do_send(NearbyStationsRequestMessage {
-                            location: Location { x, y },
-                            radius,
+                    "STATION_UPDATE" => {
+                        let update = StationUpdate::deserialize(message_text);
+                        self.server_addr.do_send(StationUpdateMessage {
+                            station: update.station,
                             response_addr: ctx.address(),
                         });
                     }
-                }
-                _ => {
-                    println!(
-                        "[SERVER] Tipo de mensaje no manejado en esta fase: {}",
-                        parts[0]
-                    );
+                    "IS_ALIVE" => {
+                        let is_alive = IsAlive::deserialize(message_text);
+                        self.elector_addr.do_send(LeaderAliveMessage {
+                            leader_id: is_alive.leader_id,
+                        });
+                    }
+                    "ELECTION_ACK" | "ACK" => {
+                        self.elector_addr.do_send(ElectionAckMessage);
+                    }
+                    "ELECTION" => {
+                        if parts.len() == 2 {
+                            if let Ok(server_id) = parts[1].parse::<ServerId>() {
+                                let ip_addr = self.socket.peer_addr().map(|addr| addr.to_string()).ok();
+                                self.elector_addr.do_send(RegisterPeerConnectionMessage {
+                                    server_id,
+                                    connection_addr: ctx.address(),
+                                    peer_addr: ip_addr,
+                                });
+                                self.elector_addr
+                                    .do_send(LeaderElectionMessage { server_id });
+                            }
+                        }
+                    }
+                    "COORDINATOR" => {
+                        if parts.len() == 2 {
+                            if let Ok(leader_id) = parts[1].parse::<ServerId>() {
+                                self.elector_addr
+                                    .do_send(LeaderAnnouncementMessage { leader_id });
+                            }
+                        }
+                    }
+                    "NEARBY_QUERY" => {
+                        if parts.len() == 4 {
+                            let x: f64 = parts[1].parse().unwrap_or(0.0);
+                            let y: f64 = parts[2].parse().unwrap_or(0.0);
+                            let radius: f64 = parts[3].parse().unwrap_or(0.0);
+
+                            self.server_addr.do_send(NearbyStationsRequestMessage {
+                                location: Location { x, y },
+                                radius,
+                                response_addr: ctx.address(),
+                            });
+                        }
+                    }
+                    _ => {
+                        println!(
+                            "[SERVER] Tipo de mensaje no manejado en esta fase: {}",
+                            parts[0]
+                        );
+                    }
                 }
             }
         }
@@ -261,8 +270,9 @@ impl Handler<RemovePeerMessage> for ElectorActor {
 impl Handler<LeaderAliveMessage> for ConnectionActor {
     type Result = ();
 
-    fn handle(&mut self, _msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        let _ = self.socket.write_all(b"IS_ALIVE\n");
+    fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
+        let alive_msg = format!("IS_ALIVE|{}\n", msg.leader_id);
+        let _ = self.socket.write_all(alive_msg.as_bytes());
     }
 }
 
@@ -294,17 +304,23 @@ impl Handler<SendCoordinatorMessage> for ConnectionActor {
 
 pub struct CentralServerActor {
     pub server_id: ServerId,
+    pub is_leader: bool,
+    pub leader_id: Option<ServerId>,
     pub station_table: HashMap<StationId, StationStatus>,
     pub peers: HashMap<ServerId, Addr<ConnectionActor>>,
     pub elector_addr: Option<Addr<ElectorActor>>,
+    pub peer_addrs: HashMap<ServerId, String>,
 }
 
 impl CentralServerActor {
     pub fn new(server_id: ServerId) -> Self {
         Self {
             server_id,
+            is_leader: false,
+            leader_id: None,
             station_table: HashMap::new(),
             peers: HashMap::new(),
+            peer_addrs: HashMap::new(),
             elector_addr: None,
         }
     }
@@ -318,12 +334,18 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: StationUpdateMessage, _ctx: &mut Context<Self>) {
-        println!(
-            "[SERVER] Actualizando datos de la estación ID: {}",
-            msg.station.station_id
-        );
-        self.station_table
-            .insert(msg.station.station_id, msg.station);
+        if !self.is_leader {
+            let leader_addr = if let Some(l_id) = self.leader_id {
+                self.peer_addrs.get(&l_id).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            
+            msg.response_addr.do_send(RejectNotLeaderMessage { leader_addr });
+            return;
+        }
+        println!("[SERVER LÍDER] Actualizando estación ID: {}", msg.station.station_id);
+        self.station_table.insert(msg.station.station_id, msg.station);
     }
 }
 
@@ -332,6 +354,11 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
 
     fn handle(&mut self, msg: NearbyStationsRequestMessage, _ctx: &mut Context<Self>) {
         let mut nearby = Vec::new();
+        if self.is_leader {
+            let replica_addr = self.peer_addrs.values().next().cloned().unwrap_or_default();
+            msg.response_addr.do_send(RejectNotReplicaMessage { replica_addr });
+            return;
+        }
 
         for station in self.station_table.values() {
             let distance = ((station.location.x - msg.location.x).powi(2)
@@ -413,5 +440,35 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
             self.elector_addr.clone(),
         )
         .start();
+    }
+}
+
+impl Handler<RejectNotLeaderMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RejectNotLeaderMessage, _ctx: &mut Self::Context) {
+        let text = format!("NOT_LEADER|{}\n", msg.leader_addr);
+        let _ = self.socket.write_all(text.as_bytes());
+    }
+}
+
+impl Handler<RejectNotReplicaMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RejectNotReplicaMessage, _ctx: &mut Self::Context) {
+        let text = format!("NOT_REPLICA|{}\n", msg.replica_addr);
+        let _ = self.socket.write_all(text.as_bytes());
+    }
+}
+
+impl Handler<RoleUpdateMessage> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RoleUpdateMessage, _ctx: &mut Context<Self>) {
+        println!("[SERVER] Actualizando rol - ¿Soy líder?: {}, ID del líder: {:?}", 
+                 msg.is_leader, msg.leader_id);
+                 
+        self.is_leader = msg.is_leader;
+        self.leader_id = msg.leader_id;
     }
 }

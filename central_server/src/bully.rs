@@ -73,6 +73,10 @@ impl ElectorActor {
                 leader_id: self.server_id,
             });
         }
+        self.central_server_addr.do_send(RoleUpdateMessage {
+            is_leader: self.is_leader,
+            leader_id: self.leader_id,
+        });
     }
 
     pub fn send_alive_to_peers(&self) {
@@ -88,7 +92,16 @@ impl Handler<LeaderAliveMessage> for ElectorActor {
     type Result = ();
 
     fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        self.leader_id = Some(msg.leader_id);
+        if self.leader_id != Some(msg.leader_id) {
+            self.is_leader = false;
+            self.leader_id = Some(msg.leader_id);
+        
+            self.central_server_addr.do_send(RoleUpdateMessage {
+                is_leader: self.is_leader,
+                leader_id: self.leader_id,
+            });
+        }
+        
         self.reset_leader_timeout();
     }
 }
@@ -117,8 +130,10 @@ impl Handler<LeaderAnnouncementMessage> for ElectorActor {
         self.leader_id = Some(msg.leader_id);
         self.reset_leader_timeout();
 
-        // self.central_server_addr.do_send(NewLeaderMessage { leader_id: msg.leader_id,
-        //     self.peer_servers.get(&msg.leader_id) });
+        self.central_server_addr.do_send(RoleUpdateMessage {
+            is_leader: self.is_leader,
+            leader_id: self.leader_id,
+        });
     }
 }
 
