@@ -1,7 +1,7 @@
-use actix::prelude::*;
-use common::*;
 use crate::actors::ConnectionActor;
 use crate::actors::ElectorActor;
+use actix::prelude::*;
+use common::*;
 // Connection --> Central
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
@@ -33,7 +33,7 @@ pub struct RegisterPeerConnectionMessage {
 
 // Connection --> Election
 #[derive(Message, Debug, Clone)]
-#[rtype(result = "()")] 
+#[rtype(result = "()")]
 pub struct RemovePeerMessage {
     pub server_id: ServerId,
 }

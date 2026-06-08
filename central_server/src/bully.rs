@@ -117,7 +117,7 @@ impl Handler<LeaderAnnouncementMessage> for ElectorActor {
         self.leader_id = Some(msg.leader_id);
         self.reset_leader_timeout();
 
-        // self.central_server_addr.do_send(NewLeaderMessage { leader_id: msg.leader_id, 
+        // self.central_server_addr.do_send(NewLeaderMessage { leader_id: msg.leader_id,
         //     self.peer_servers.get(&msg.leader_id) });
     }
 }

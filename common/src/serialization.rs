@@ -53,11 +53,7 @@ impl Serializable for RentConfirmed {
 
 impl Serializable for RentRejected {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            MessageType::RentRejected.as_str(),
-            &self.reason
-        )
+        format!("{}|{}", MessageType::RentRejected.as_str(), &self.reason)
     }
 }
 
@@ -74,11 +70,7 @@ impl Serializable for ReturnConfirmed {
 
 impl Serializable for ReturnRejected {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            MessageType::ReturnRejected.as_str(),
-            &self.reason
-        )
+        format!("{}|{}", MessageType::ReturnRejected.as_str(), &self.reason)
     }
 }
 
@@ -94,31 +86,19 @@ impl Serializable for StationUpdate {
 
 impl Serializable for IsAlive {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            MessageType::IsAlive.as_str(),
-            self.leader_id
-        )
+        format!("{}|{}", MessageType::IsAlive.as_str(), self.leader_id)
     }
 }
 
 impl Serializable for Election {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            MessageType::Election.as_str(),
-            self.candidate_id
-        )
+        format!("{}|{}", MessageType::Election.as_str(), self.candidate_id)
     }
 }
 
 impl Serializable for Coordinator {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            MessageType::Coordinator.as_str(),
-            self.leader_id
-        )
+        format!("{}|{}", MessageType::Coordinator.as_str(), self.leader_id)
     }
 }
 
@@ -172,11 +152,7 @@ impl Serializable for PreparePayment {
 
 impl<T: TransactionMessage> Serializable for T {
     fn serialize(&self) -> String {
-        format!(
-            "{}|{}",
-            T::message_type().as_str(),
-            self.transaction_id()
-        )
+        format!("{}|{}", T::message_type().as_str(), self.transaction_id())
     }
 }
 
@@ -191,4 +167,3 @@ fn serialize_station_status(station: &StationStatus) -> String {
         station.updated_at_secs
     )
 }
-

@@ -1,6 +1,6 @@
 use crate::entities::*;
-use actix::prelude::*;
 use crate::message_types::MessageType;
+use actix::prelude::*;
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -36,7 +36,7 @@ pub struct RentRejected {
 }
 
 #[derive(Message)]
-#[rtype(result = "()")] 
+#[rtype(result = "()")]
 pub struct ReturnConfirmed {
     pub charged_cents: u32,
     pub timestamp_secs: u64,
@@ -191,7 +191,7 @@ impl TransactionMessage for RollbackPayment {
         Self { transaction_id: id }
     }
     fn transaction_id(&self) -> String {
-        self.transaction_id.clone() 
+        self.transaction_id.clone()
     }
     fn message_type() -> MessageType {
         MessageType::RollbackPayment
@@ -203,10 +203,10 @@ pub struct RequestMessage<T, A: actix::Actor> {
     pub response: actix::Addr<A>,
 }
 
-impl<T, A> Message for RequestMessage<T, A> 
-where 
+impl<T, A> Message for RequestMessage<T, A>
+where
     T: Send + 'static,
-    A: actix::Actor
+    A: actix::Actor,
 {
     type Result = ();
 }

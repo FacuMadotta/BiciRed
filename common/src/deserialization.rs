@@ -197,4 +197,3 @@ impl<T: TransactionMessage> Deserializable for T {
         Self::new(id)
     }
 }
-

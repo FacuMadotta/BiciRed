@@ -1,12 +1,15 @@
-use actix::prelude::*;
+use crate::actors::{CentralServerActor, ConnectionActor};
 use crate::messages_actors::*;
-use crate::actors::{ConnectionActor, CentralServerActor};
+use actix::prelude::*;
 
 impl Handler<PeerConnectedMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: PeerConnectedMessage, ctx: &mut Self::Context) {
-        println!("[SERVER] Recibida nueva conexión cruda para el peer {}. Iniciando actor...", msg.peer_id);
+        println!(
+            "[SERVER] Recibida nueva conexión cruda para el peer {}. Iniciando actor...",
+            msg.peer_id
+        );
 
         let connection_addr = ConnectionActor::new_outgoing(
             self.server_id,
@@ -14,8 +17,11 @@ impl Handler<PeerConnectedMessage> for CentralServerActor {
             msg.peer_addr,
             msg.socket,
             ctx.address(),
-            self.elector_addr.clone().expect("ElectorActor no registrado en CentralServerActor"),
-        ).start();
+            self.elector_addr
+                .clone()
+                .expect("ElectorActor no registrado en CentralServerActor"),
+        )
+        .start();
 
         self.peers.insert(msg.peer_id, connection_addr.clone());
 
@@ -42,7 +48,10 @@ impl Handler<RemovePeerMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: RemovePeerMessage, _ctx: &mut Self::Context) {
-        println!("[SERVER] Removiendo peer {} de la tabla de peers", msg.server_id);
+        println!(
+            "[SERVER] Removiendo peer {} de la tabla de peers",
+            msg.server_id
+        );
         self.peers.remove(&msg.server_id);
     }
 }
@@ -51,8 +60,10 @@ impl Handler<RegisterPeerConnectionMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: RegisterPeerConnectionMessage, _ctx: &mut Self::Context) {
-        println!("[SERVER] Registrando conexión del peer {} en la tabla de peers", msg.server_id);
+        println!(
+            "[SERVER] Registrando conexión del peer {} en la tabla de peers",
+            msg.server_id
+        );
         self.peers.insert(msg.server_id, msg.connection_addr);
     }
 }
-

@@ -1,15 +1,15 @@
+use crate::messages_actors::IncomingData;
+use crate::messages_actors::NewConnectionMessage;
+use crate::messages_actors::*;
 use actix::prelude::*;
 use common::*;
 use std::collections::HashMap;
-use std::net::TcpStream;
-use std::io::Write;
-use crate::messages_actors::*;
 use std::io::Read;
-use std::time::Instant;
+use std::io::Write;
+use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
-use crate::messages_actors::IncomingData;
-use crate::messages_actors::NewConnectionMessage;
+use std::time::Instant;
 
 pub struct ConnectionActor {
     pub server_id: ServerId,
@@ -22,7 +22,12 @@ pub struct ConnectionActor {
 }
 
 impl ConnectionActor {
-    pub fn new_incoming(server_id: ServerId, socket: TcpStream, server: Addr<CentralServerActor>, elector: Addr<ElectorActor>) -> Self {
+    pub fn new_incoming(
+        server_id: ServerId,
+        socket: TcpStream,
+        server: Addr<CentralServerActor>,
+        elector: Addr<ElectorActor>,
+    ) -> Self {
         Self {
             server_id,
             peer_id: None,
@@ -34,7 +39,14 @@ impl ConnectionActor {
         }
     }
 
-    pub fn new_outgoing(server_id: ServerId, peer_id: ServerId, peer_addr: String, socket: TcpStream, server: Addr<CentralServerActor>, elector: Addr<ElectorActor>) -> Self {
+    pub fn new_outgoing(
+        server_id: ServerId,
+        peer_id: ServerId,
+        peer_addr: String,
+        socket: TcpStream,
+        server: Addr<CentralServerActor>,
+        elector: Addr<ElectorActor>,
+    ) -> Self {
         Self {
             server_id,
             peer_id: Some(peer_id),
@@ -56,14 +68,14 @@ impl Actor for ConnectionActor {
 
         if let Ok(mut stream_clone) = self.socket.try_clone() {
             let addr = ctx.address();
-            
+
             std::thread::spawn(move || {
                 let mut buf = [0; 1024];
                 while let Ok(n) = stream_clone.read(&mut buf) {
-                    if n == 0 { 
+                    if n == 0 {
                         println!("[SERVER] El cliente cerró la conexión.");
                         addr.do_send(ConnectionClosed);
-                        break; 
+                        break;
                     }
                     addr.do_send(IncomingData(buf[..n].to_vec()));
                 }
@@ -76,8 +88,10 @@ impl Actor for ConnectionActor {
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         if let Some(peer_id) = self.peer_id {
-            self.elector_addr.do_send(RemovePeerMessage { server_id: peer_id });
-            self.server_addr.do_send(RemovePeerMessage { server_id: peer_id });
+            self.elector_addr
+                .do_send(RemovePeerMessage { server_id: peer_id });
+            self.server_addr
+                .do_send(RemovePeerMessage { server_id: peer_id });
         }
 
         if !self.reconnect_on_stop {
@@ -91,24 +105,28 @@ impl Actor for ConnectionActor {
         let peer_id = self.peer_id;
         let server_addr = self.server_addr.clone();
 
-        thread::spawn(move || {
-            loop {
-                match TcpStream::connect(&peer_addr) {
-                    Ok(socket) => {
-                        if let Some(target_peer_id) = peer_id {
-                            println!("[ELECTION] Reconectado con peer {} en {}", target_peer_id, peer_addr);
-                            server_addr.do_send(PeerConnectedMessage {
-                                peer_id: target_peer_id,
-                                peer_addr: peer_addr.clone(),
-                                socket,
-                            });
-                        }
-                        break;
+        thread::spawn(move || loop {
+            match TcpStream::connect(&peer_addr) {
+                Ok(socket) => {
+                    if let Some(target_peer_id) = peer_id {
+                        println!(
+                            "[ELECTION] Reconectado con peer {} en {}",
+                            target_peer_id, peer_addr
+                        );
+                        server_addr.do_send(PeerConnectedMessage {
+                            peer_id: target_peer_id,
+                            peer_addr: peer_addr.clone(),
+                            socket,
+                        });
                     }
-                    Err(err) => {
-                        eprintln!("[ELECTION] Reintentando conexión con {}: {}", peer_addr, err);
-                        thread::sleep(Duration::from_secs(1));
-                    }
+                    break;
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[ELECTION] Reintentando conexión con {}: {}",
+                        peer_addr, err
+                    );
+                    thread::sleep(Duration::from_secs(1));
                 }
             }
         });
@@ -121,82 +139,95 @@ impl Handler<IncomingData> for ConnectionActor {
     fn handle(&mut self, msg: IncomingData, ctx: &mut Self::Context) {
         if let Ok(text) = String::from_utf8(msg.0) {
             let message_text = text.trim();
-            if message_text.is_empty() { return; }
+            if message_text.is_empty() {
+                return;
+            }
 
             let parts: Vec<&str> = message_text.split('|').collect();
-            if parts.is_empty() { return; }
+            if parts.is_empty() {
+                return;
+            }
 
-                match parts[0] {
-                    "HELLO" => {
-                        if parts.len() == 2 {
-                            if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                                let msg = RegisterPeerConnectionMessage {
-                                    server_id,
-                                    connection_addr: ctx.address(),
-                                };
-                                self.elector_addr.do_send(msg.clone());
-                                self.server_addr.do_send(msg);
-                                self.peer_id = Some(server_id);
-                            }
+            match parts[0] {
+                "HELLO" => {
+                    if parts.len() == 2 {
+                        if let Ok(server_id) = parts[1].parse::<ServerId>() {
+                            let msg = RegisterPeerConnectionMessage {
+                                server_id,
+                                connection_addr: ctx.address(),
+                            };
+                            self.elector_addr.do_send(msg.clone());
+                            self.server_addr.do_send(msg);
+                            self.peer_id = Some(server_id);
                         }
                     }
-                    "STATION_UPDATE" => {
-                        let update = StationUpdate::deserialize(message_text);
-                        self.server_addr.do_send(StationUpdateMessage {
-                            station: update.station,
+                }
+                "STATION_UPDATE" => {
+                    let update = StationUpdate::deserialize(message_text);
+                    self.server_addr.do_send(StationUpdateMessage {
+                        station: update.station,
+                    });
+                }
+                "IS_ALIVE" => {
+                    let is_alive = IsAlive::deserialize(message_text);
+                    self.elector_addr.do_send(LeaderAliveMessage {
+                        leader_id: is_alive.leader_id,
+                    });
+                }
+                "ELECTION_ACK" | "ACK" => {
+                    self.elector_addr.do_send(ElectionAckMessage);
+                }
+                "ELECTION" => {
+                    if parts.len() == 2 {
+                        if let Ok(server_id) = parts[1].parse::<ServerId>() {
+                            self.elector_addr.do_send(RegisterPeerConnectionMessage {
+                                server_id,
+                                connection_addr: ctx.address(),
+                            });
+                            self.elector_addr
+                                .do_send(LeaderElectionMessage { server_id });
+                        }
+                    }
+                }
+                "COORDINATOR" => {
+                    if parts.len() == 2 {
+                        if let Ok(leader_id) = parts[1].parse::<ServerId>() {
+                            self.elector_addr
+                                .do_send(LeaderAnnouncementMessage { leader_id });
+                        }
+                    }
+                }
+                "NEARBY_QUERY" => {
+                    if parts.len() == 4 {
+                        let x: f64 = parts[1].parse().unwrap_or(0.0);
+                        let y: f64 = parts[2].parse().unwrap_or(0.0);
+                        let radius: f64 = parts[3].parse().unwrap_or(0.0);
+
+                        self.server_addr.do_send(NearbyStationsRequestMessage {
+                            location: Location { x, y },
+                            radius,
+                            response_addr: ctx.address(),
                         });
                     }
-                    "IS_ALIVE" => {
-                        let is_alive = IsAlive::deserialize(message_text);
-                        self.elector_addr.do_send(LeaderAliveMessage { leader_id: is_alive.leader_id });
-                    }
-                    "ELECTION_ACK" | "ACK" => {
-                        self.elector_addr.do_send(ElectionAckMessage);
-                    }
-                    "ELECTION" => {
-                        if parts.len() == 2 {
-                            if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                                self.elector_addr.do_send(RegisterPeerConnectionMessage {
-                                    server_id,
-                                    connection_addr: ctx.address(),
-                                });
-                                self.elector_addr.do_send(LeaderElectionMessage { server_id });
-                            }
-                        }
-                    }
-                    "COORDINATOR" => {
-                        if parts.len() == 2 {
-                            if let Ok(leader_id) = parts[1].parse::<ServerId>() {
-                                self.elector_addr.do_send(LeaderAnnouncementMessage { leader_id });
-                            }
-                        }
-                    }
-                    "NEARBY_QUERY" => {
-                        if parts.len() == 4 {
-                            let x: f64 = parts[1].parse().unwrap_or(0.0);
-                            let y: f64 = parts[2].parse().unwrap_or(0.0);
-                            let radius: f64 = parts[3].parse().unwrap_or(0.0);
-
-                            self.server_addr.do_send(NearbyStationsRequestMessage {
-                                location: Location { x, y },
-                                radius,
-                                response_addr: ctx.address(),
-                            });
-                        }
-                    }
-                    _ => {
-                        println!("[SERVER] Tipo de mensaje no manejado en esta fase: {}", parts[0]);
-                    }
+                }
+                _ => {
+                    println!(
+                        "[SERVER] Tipo de mensaje no manejado en esta fase: {}",
+                        parts[0]
+                    );
                 }
             }
         }
     }
+}
 
 impl Handler<NearbyStationsResponseMessage> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: NearbyStationsResponseMessage, _ctx: &mut Self::Context) {
-        let response = NearbyResponse { stations: msg.stations };
+        let response = NearbyResponse {
+            stations: msg.stations,
+        };
         let response_text = response.serialize();
         let _ = self.socket.write_all(response_text.as_bytes());
         let _ = self.socket.write_all(b"\n");
@@ -287,8 +318,12 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: StationUpdateMessage, _ctx: &mut Context<Self>) {
-        println!("[SERVER] Actualizando datos de la estación ID: {}", msg.station.station_id);
-        self.station_table.insert(msg.station.station_id, msg.station);
+        println!(
+            "[SERVER] Actualizando datos de la estación ID: {}",
+            msg.station.station_id
+        );
+        self.station_table
+            .insert(msg.station.station_id, msg.station);
     }
 }
 
@@ -299,13 +334,17 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
         let mut nearby = Vec::new();
 
         for station in self.station_table.values() {
-            let distance = ((station.location.x - msg.location.x).powi(2) 
-                + (station.location.y - msg.location.y).powi(2)).sqrt();
-            
+            let distance = ((station.location.x - msg.location.x).powi(2)
+                + (station.location.y - msg.location.y).powi(2))
+            .sqrt();
+
             if distance <= msg.radius {
                 nearby.push(StationStatus {
                     station_id: station.station_id,
-                    location: Location { x: station.location.x, y: station.location.y },
+                    location: Location {
+                        x: station.location.x,
+                        y: station.location.y,
+                    },
                     available_bikes: station.available_bikes,
                     free_slots: station.free_slots,
                     updated_at_secs: station.updated_at_secs,
@@ -313,7 +352,8 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
             }
         }
 
-        msg.response_addr.do_send(NearbyStationsResponseMessage { stations: nearby });
+        msg.response_addr
+            .do_send(NearbyStationsResponseMessage { stations: nearby });
     }
 }
 
@@ -366,6 +406,12 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
 
     fn handle(&mut self, msg: NewConnectionMessage, _ctx: &mut Self::Context) {
         println!("[SERVER] Spawner recibiendo socket. Levantando ConnectionActor...");
-        ConnectionActor::new_incoming(self.server_id, msg.0, self.server_addr.clone(), self.elector_addr.clone()).start();
+        ConnectionActor::new_incoming(
+            self.server_id,
+            msg.0,
+            self.server_addr.clone(),
+            self.elector_addr.clone(),
+        )
+        .start();
     }
 }

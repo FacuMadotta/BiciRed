@@ -1,3 +1,4 @@
+#[derive(PartialEq)]
 pub enum MessageType {
     RentRequest,
     ReturnRequest,
@@ -17,6 +18,8 @@ pub enum MessageType {
     CommitPayment,
     CapturePayment,
     RollbackPayment,
+    NotReplica,
+    Prepare,
 }
 
 impl MessageType {
@@ -40,6 +43,8 @@ impl MessageType {
             Self::CommitPayment => "COMMIT_PAYMENT",
             Self::CapturePayment => "CAPTURE_PAYMENT",
             Self::RollbackPayment => "ROLLBACK_PAYMENT",
+            Self::NotReplica => "NOT_REPLICA",
+            Self::Prepare => "PREPARE",
         }
     }
 
@@ -57,12 +62,12 @@ impl MessageType {
             "COORDINATOR" => Some(Self::Coordinator),
             "ACK" => Some(Self::Ack),
             "NEARBY_RESPONSE" => Some(Self::NearbyResponse),
-            "PREPARE_PAYMENT" => Some(Self::PreparePayment  ),
+            "PREPARE_PAYMENT" => Some(Self::PreparePayment),
             "VOTE_COMMIT" => Some(Self::VoteCommit),
             "VOTE_ABORT" => Some(Self::VoteAbort),
             "COMMIT_PAYMENT" => Some(Self::CommitPayment),
             "CAPTURE_PAYMENT" => Some(Self::CapturePayment),
-            "ROLLBACK_PAYMENT" => Some(Self::RollbackPayment),            
+            "ROLLBACK_PAYMENT" => Some(Self::RollbackPayment),
             _ => None,
         }
     }

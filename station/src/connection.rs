@@ -1,8 +1,8 @@
+use crate::StationActor;
 use actix::prelude::*;
 use common::*;
-use std::net::TcpStream;
 use std::io::{Read, Write};
-use crate::StationActor;
+use std::net::TcpStream;
 
 // Actor que maneja la conexión con un cliente, recibiendo solicitudes, y enviando respuestas.
 pub struct ConnectionActor {
@@ -12,11 +12,14 @@ pub struct ConnectionActor {
 
 impl ConnectionActor {
     pub fn new(socket: TcpStream, station: Addr<StationActor>) -> Self {
-        Self { socket, station_addr: station }
+        Self {
+            socket,
+            station_addr: station,
+        }
     }
 
-    fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context) 
-    where 
+    fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context)
+    where
         T: Deserializable + 'static + Send,
         StationActor: Handler<RequestMessage<T, ConnectionActor>>,
     {
@@ -27,8 +30,8 @@ impl ConnectionActor {
         });
     }
 
-    fn send_response<T>(&mut self, response: T) 
-    where 
+    fn send_response<T>(&mut self, response: T)
+    where
         T: Serializable,
     {
         let response_text = response.serialize();
@@ -79,7 +82,7 @@ impl Handler<IncomingData> for ConnectionActor {
         if let Ok(text) = String::from_utf8(msg.0) {
             let message_text = text.trim();
             let message_type = MessageType::deserialize(message_text);
-            
+
             match message_type {
                 MessageType::RentRequest => self.send_message::<RentRequest>(message_text, ctx),
                 MessageType::ReturnRequest => self.send_message::<ReturnRequest>(message_text, ctx),

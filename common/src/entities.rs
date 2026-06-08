@@ -1,4 +1,3 @@
-
 pub type StationId = u32;
 pub type BikeId = u32;
 pub type UserId = u32;

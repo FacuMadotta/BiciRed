@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use std::env;
 use actix::prelude::*;
 use common::{Acceptor, NewConnectionMessage};
+use std::collections::HashMap;
+use std::env;
 mod connection;
 mod service;
-use connection::{SpawnerActor};
+use connection::SpawnerActor;
 use service::PaymentServiceActor;
-
 
 #[actix::main]
 async fn main() -> std::io::Result<()> {
@@ -21,7 +20,10 @@ async fn main() -> std::io::Result<()> {
 
     let payment_service_addr = PaymentServiceActor::new().start();
 
-    let spawner_addr = SpawnerActor { payment_service_addr: payment_service_addr.clone() }.start();
+    let spawner_addr = SpawnerActor {
+        payment_service_addr: payment_service_addr.clone(),
+    }
+    .start();
 
     Acceptor::new(ip, move |stream| {
         spawner_addr.do_send(NewConnectionMessage(stream));
