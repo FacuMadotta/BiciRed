@@ -13,8 +13,6 @@ impl Handler<PeerConnectedMessage> for CentralServerActor {
 
         self.peer_addrs.insert(msg.peer_id, msg.peer_addr.clone());
 
-        let ip_addr_for_msg = msg.peer_addr.clone();
-
         let connection_addr = ConnectionActor::new_outgoing(
             self.server_id,
             msg.peer_id,
@@ -33,7 +31,7 @@ impl Handler<PeerConnectedMessage> for CentralServerActor {
             let msg = RegisterPeerConnectionMessage {
                 server_id: msg.peer_id,
                 connection_addr: connection_addr.clone(),
-                peer_addr: Some(ip_addr_for_msg),
+                peer_addr: None,
             };
             elector_addr.do_send(msg);
         }
@@ -70,8 +68,5 @@ impl Handler<RegisterPeerConnectionMessage> for CentralServerActor {
             msg.server_id
         );
         self.peers.insert(msg.server_id, msg.connection_addr);
-        if let Some(addr) = msg.peer_addr {
-            self.peer_addrs.insert(msg.server_id, addr);
-        }
     }
 }

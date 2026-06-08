@@ -45,7 +45,12 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let server_addr = CentralServerActor::new(server_id).start();
+    let mut peer_map = std::collections::HashMap::new();
+    for node in &server_nodes {
+        peer_map.insert(node.id, node.addr.clone());
+    }
+
+    let server_addr = CentralServerActor::new(server_id, peer_map).start();
     let elector_addr = ElectorActor::new(server_id, server_addr.clone()).start();
     server_addr.do_send(RegisterElectionActor {
         elector_addr: elector_addr.clone(),

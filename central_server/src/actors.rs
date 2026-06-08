@@ -313,14 +313,14 @@ pub struct CentralServerActor {
 }
 
 impl CentralServerActor {
-    pub fn new(server_id: ServerId) -> Self {
+    pub fn new(server_id: ServerId, peer_addrs: std::collections::HashMap<ServerId, String>) -> Self {
         Self {
             server_id,
             is_leader: false,
             leader_id: None,
             station_table: HashMap::new(),
             peers: HashMap::new(),
-            peer_addrs: HashMap::new(),
+            peer_addrs,
             elector_addr: None,
         }
     }
