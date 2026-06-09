@@ -218,6 +218,33 @@ impl Handler<IncomingData> for ConnectionActor {
                             });
                         }
                     }
+                    "REPLICA_SYNC" => {
+                        if parts.len() >= 2 {
+                            let mut new_table = HashMap::new();
+                            if !parts[1].is_empty() {
+                                for st_str in parts[1].split(';') {
+                                    let props: Vec<&str> = st_str.split(',').collect();
+                                    if props.len() == 6 {
+                                        if let (Ok(id), Ok(x), Ok(y), Ok(bikes), Ok(slots), Ok(ts)) = (
+                                            props[0].parse(), props[1].parse(), props[2].parse(),
+                                            props[3].parse(), props[4].parse(), props[5].parse()
+                                        ) {
+                                            new_table.insert(id, StationStatus {
+                                                station_id: id,
+                                                location: Location { x, y },
+                                                available_bikes: bikes,
+                                                free_slots: slots,
+                                                updated_at_secs: ts,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            self.server_addr.do_send(ReplicaSyncMessage {
+                                station_table: new_table,
+                            });
+                        }
+                    }
                     _ => {
                         println!(
                             "[SERVER] Tipo de mensaje no manejado en esta fase: {}",
@@ -346,6 +373,12 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
         }
         println!("[SERVER LÍDER] Actualizando estación ID: {}", msg.station.station_id);
         self.station_table.insert(msg.station.station_id, msg.station);
+
+        for peer_con in self.peers.values() {
+            peer_con.do_send(SendReplicaSyncMessage {
+                station_table: self.station_table.clone(),
+            });
+        }
     }
 }
 
@@ -470,5 +503,37 @@ impl Handler<RoleUpdateMessage> for CentralServerActor {
                  
         self.is_leader = msg.is_leader;
         self.leader_id = msg.leader_id;
+    }
+}
+
+impl Handler<SendReplicaSyncMessage> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SendReplicaSyncMessage, _ctx: &mut Self::Context) {
+        let mut stations_str = Vec::new();
+        for st in msg.station_table.values() {
+            stations_str.push(format!("{},{},{},{},{},{}",
+                st.station_id,
+                st.location.x,
+                st.location.y,
+                st.available_bikes,
+                st.free_slots,
+                st.updated_at_secs
+            ));
+        }
+
+        let payload = format!("REPLICA_SYNC|{}\n", stations_str.join(";"));
+        let _ = self.socket.write_all(payload.as_bytes());
+    }
+}
+
+impl Handler<ReplicaSyncMessage> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReplicaSyncMessage, _ctx: &mut Context<Self>) {
+        if !self.is_leader {
+            println!("[SERVER RÉPLICA] Sincronizando tabla de estaciones desde el Líder. Total estaciones: {}", msg.station_table.len());
+            self.station_table = msg.station_table;
+        }
     }
 }
