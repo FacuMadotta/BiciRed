@@ -95,13 +95,13 @@ impl Handler<LeaderAliveMessage> for ElectorActor {
         if self.leader_id != Some(msg.leader_id) {
             self.is_leader = false;
             self.leader_id = Some(msg.leader_id);
-        
+
             self.central_server_addr.do_send(RoleUpdateMessage {
                 is_leader: self.is_leader,
                 leader_id: self.leader_id,
             });
         }
-        
+
         self.reset_leader_timeout();
     }
 }

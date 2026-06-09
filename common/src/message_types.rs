@@ -20,7 +20,7 @@ pub enum MessageType {
     RollbackPayment,
     NotReplica,
     Prepare,
-    NotLeader
+    NotLeader,
 }
 
 impl MessageType {

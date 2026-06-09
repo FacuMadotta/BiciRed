@@ -25,14 +25,18 @@ pub enum SlotState {
 }
 
 impl Station {
-    pub fn new(id: StationId, location: Location, num_slots: usize) -> Self {
+    pub fn new(id: StationId, location: Location, num_slots: usize, num_bikes: usize) -> Self {
         let slots = (0..num_slots)
             .map(|i| Slot {
                 index: i,
-                state: SlotState::Occupied {
-                    bike_id: i as BikeId,
+                state: if i < num_bikes {
+                    SlotState::Occupied {
+                        bike_id: i as BikeId,
+                    }
+                } else {
+                    SlotState::Empty
                 },
-            }) // Inicialmente todos los slots ocupados con bicicletas con IDs iguales al índice del slot.
+            })
             .collect();
         Self {
             id,

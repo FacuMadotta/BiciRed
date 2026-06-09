@@ -39,34 +39,32 @@ pub fn load_servers_csv(filepath: &str) -> io::Result<Vec<ServerNode>> {
     Ok(servers)
 }
 
-pub fn load_stations_csv(filepath: &str) -> io::Result<Vec<StationStatus>> {
-    let file = File::open(filepath)?;
-    let reader = BufReader::new(file);
-    let mut stations = Vec::new();
+pub fn load_stations_csv(
+    filepath: &str,
+    target_id: StationId,
+) -> Option<(String, usize, usize, Location)> {
+    let content = std::fs::read_to_string(filepath).ok()?;
 
-    for line in reader.lines() {
-        let line = line?;
-        if line.trim().is_empty() || line.starts_with('#') {
+    for line in content.lines() {
+        let clean_line = line.trim();
+        if clean_line.starts_with('#') || clean_line.is_empty() {
             continue;
         }
 
         let parts: Vec<&str> = line.split(',').collect();
 
-        if parts.len() == 6 {
-            let id = parts[0].trim().parse::<StationId>().unwrap_or(0);
-            let slots = parts[2].trim().parse::<u8>().unwrap_or(0);
-            let bikes = parts[3].trim().parse::<u8>().unwrap_or(0);
-            let x = parts[4].trim().parse::<f64>().unwrap_or(0.0);
-            let y = parts[5].trim().parse::<f64>().unwrap_or(0.0);
-
-            stations.push(StationStatus {
-                station_id: id,
-                location: Location { x, y },
-                available_bikes: bikes,
-                free_slots: slots,
-                updated_at_secs: 0,
-            });
+        if parts.len() >= 6 {
+            if let Ok(id) = parts[0].parse::<StationId>() {
+                if id == target_id {
+                    let ip = parts[1].to_string();
+                    let slots = parts[2].parse().unwrap_or(10);
+                    let bikes = parts[3].parse().unwrap_or(5);
+                    let x = parts[4].parse().unwrap_or(0.0);
+                    let y = parts[5].parse().unwrap_or(0.0);
+                    return Some((ip, slots, bikes, Location { x, y }));
+                }
+            }
         }
     }
-    Ok(stations)
+    None
 }

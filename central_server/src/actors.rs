@@ -155,7 +155,8 @@ impl Handler<IncomingData> for ConnectionActor {
                     "HELLO" => {
                         if parts.len() == 2 {
                             if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                                let ip_addr = self.socket.peer_addr().map(|addr| addr.to_string()).ok();
+                                let ip_addr =
+                                    self.socket.peer_addr().map(|addr| addr.to_string()).ok();
                                 let msg = RegisterPeerConnectionMessage {
                                     server_id,
                                     connection_addr: ctx.address(),
@@ -186,7 +187,8 @@ impl Handler<IncomingData> for ConnectionActor {
                     "ELECTION" => {
                         if parts.len() == 2 {
                             if let Ok(server_id) = parts[1].parse::<ServerId>() {
-                                let ip_addr = self.socket.peer_addr().map(|addr| addr.to_string()).ok();
+                                let ip_addr =
+                                    self.socket.peer_addr().map(|addr| addr.to_string()).ok();
                                 self.elector_addr.do_send(RegisterPeerConnectionMessage {
                                     server_id,
                                     connection_addr: ctx.address(),
@@ -224,18 +226,33 @@ impl Handler<IncomingData> for ConnectionActor {
                             if !parts[1].is_empty() {
                                 for st_str in parts[1].split(';') {
                                     let props: Vec<&str> = st_str.split(',').collect();
-                                    if props.len() == 6 {
-                                        if let (Ok(id), Ok(x), Ok(y), Ok(bikes), Ok(slots), Ok(ts)) = (
-                                            props[0].parse(), props[1].parse(), props[2].parse(),
-                                            props[3].parse(), props[4].parse(), props[5].parse()
+                                    if props.len() == 7 {
+                                        if let (
+                                            Ok(id),
+                                            Ok(x),
+                                            Ok(y),
+                                            Ok(bikes),
+                                            Ok(slots),
+                                            Ok(ts),
+                                        ) = (
+                                            props[0].parse(),
+                                            props[1].parse(),
+                                            props[2].parse(),
+                                            props[3].parse(),
+                                            props[4].parse(),
+                                            props[5].parse(),
                                         ) {
-                                            new_table.insert(id, StationStatus {
-                                                station_id: id,
-                                                location: Location { x, y },
-                                                available_bikes: bikes,
-                                                free_slots: slots,
-                                                updated_at_secs: ts,
-                                            });
+                                            new_table.insert(
+                                                id,
+                                                StationStatus {
+                                                    station_id: id,
+                                                    location: Location { x, y },
+                                                    available_bikes: bikes,
+                                                    free_slots: slots,
+                                                    updated_at_secs: ts,
+                                                    station_addr: props[6].to_string(),
+                                                },
+                                            );
                                         }
                                     }
                                 }
@@ -340,7 +357,10 @@ pub struct CentralServerActor {
 }
 
 impl CentralServerActor {
-    pub fn new(server_id: ServerId, peer_addrs: std::collections::HashMap<ServerId, String>) -> Self {
+    pub fn new(
+        server_id: ServerId,
+        peer_addrs: std::collections::HashMap<ServerId, String>,
+    ) -> Self {
         Self {
             server_id,
             is_leader: false,
@@ -367,12 +387,17 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
             } else {
                 String::new()
             };
-            
-            msg.response_addr.do_send(RejectNotLeaderMessage { leader_addr });
+
+            msg.response_addr
+                .do_send(RejectNotLeaderMessage { leader_addr });
             return;
         }
-        println!("[SERVER LÍDER] Actualizando estación ID: {}", msg.station.station_id);
-        self.station_table.insert(msg.station.station_id, msg.station);
+        println!(
+            "[SERVER LÍDER] Actualizando estación ID: {}",
+            msg.station.station_id
+        );
+        self.station_table
+            .insert(msg.station.station_id, msg.station);
 
         for peer_con in self.peers.values() {
             peer_con.do_send(SendReplicaSyncMessage {
@@ -389,7 +414,8 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
         let mut nearby = Vec::new();
         if self.is_leader {
             let replica_addr = self.peer_addrs.values().next().cloned().unwrap_or_default();
-            msg.response_addr.do_send(RejectNotReplicaMessage { replica_addr });
+            msg.response_addr
+                .do_send(RejectNotReplicaMessage { replica_addr });
             return;
         }
 
@@ -408,6 +434,7 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
                     available_bikes: station.available_bikes,
                     free_slots: station.free_slots,
                     updated_at_secs: station.updated_at_secs,
+                    station_addr: station.station_addr.clone(),
                 });
             }
         }
@@ -498,9 +525,11 @@ impl Handler<RoleUpdateMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: RoleUpdateMessage, _ctx: &mut Context<Self>) {
-        println!("[SERVER] Actualizando rol - ¿Soy líder?: {}, ID del líder: {:?}", 
-                 msg.is_leader, msg.leader_id);
-                 
+        println!(
+            "[SERVER] Actualizando rol - ¿Soy líder?: {}, ID del líder: {:?}",
+            msg.is_leader, msg.leader_id
+        );
+
         self.is_leader = msg.is_leader;
         self.leader_id = msg.leader_id;
     }
@@ -512,13 +541,15 @@ impl Handler<SendReplicaSyncMessage> for ConnectionActor {
     fn handle(&mut self, msg: SendReplicaSyncMessage, _ctx: &mut Self::Context) {
         let mut stations_str = Vec::new();
         for st in msg.station_table.values() {
-            stations_str.push(format!("{},{},{},{},{},{}",
+            stations_str.push(format!(
+                "{},{},{},{},{},{},{}",
                 st.station_id,
                 st.location.x,
                 st.location.y,
                 st.available_bikes,
                 st.free_slots,
-                st.updated_at_secs
+                st.updated_at_secs,
+                st.station_addr
             ));
         }
 

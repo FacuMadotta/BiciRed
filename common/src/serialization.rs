@@ -158,12 +158,13 @@ impl<T: TransactionMessage> Serializable for T {
 
 fn serialize_station_status(station: &StationStatus) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}",
         station.station_id,
         station.location.x,
         station.location.y,
         station.available_bikes,
         station.free_slots,
-        station.updated_at_secs
+        station.updated_at_secs,
+        station.station_addr
     )
 }

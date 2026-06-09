@@ -162,8 +162,8 @@ impl Deserializable for Location {
 
 impl Deserializable for StationStatus {
     fn deserialize(input: &str) -> Self {
-        let parts: Vec<&str> = input.splitn(6, '|').collect();
-        assert!(parts.len() == 6);
+        let parts: Vec<&str> = input.splitn(7, '|').collect();
+        assert!(parts.len() == 7);
         Self {
             station_id: parts[0].parse().expect("Invalid station_id"),
             location: Location {
@@ -173,6 +173,7 @@ impl Deserializable for StationStatus {
             available_bikes: parts[3].parse().expect("Invalid available_bikes"),
             free_slots: parts[4].parse().expect("Invalid free_slots"),
             updated_at_secs: parts[5].parse().expect("Invalid updated_at_secs"),
+            station_addr: parts[6].to_string(),
         }
     }
 }

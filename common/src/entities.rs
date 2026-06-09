@@ -16,6 +16,7 @@ pub struct StationStatus {
     pub available_bikes: u8,
     pub free_slots: u8,
     pub updated_at_secs: u64,
+    pub station_addr: String,
 }
 
 #[derive(Debug, Clone)]
