@@ -130,3 +130,17 @@ pub struct RejectNotLeaderMessage {
 pub struct RejectNotReplicaMessage {
     pub replica_addr: String,
 }
+
+// Central (Líder) --> Connection
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct SendReplicaSyncMessage {
+    pub station_table: std::collections::HashMap<StationId, StationStatus>,
+}
+
+// Connection --> Central (Réplica)
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct ReplicaSyncMessage {
+    pub station_table: std::collections::HashMap<StationId, StationStatus>,
+}
