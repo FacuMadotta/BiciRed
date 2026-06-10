@@ -209,9 +209,9 @@ impl Handler<IncomingData> for ConnectionActor {
                     }
                     "NEARBY_QUERY" => {
                         if parts.len() == 4 {
-                            let x: f64 = parts[1].parse().unwrap_or(0.0);
-                            let y: f64 = parts[2].parse().unwrap_or(0.0);
-                            let radius: f64 = parts[3].parse().unwrap_or(0.0);
+                            let x: f64 = parts[1].trim().parse().unwrap_or(0.0);
+                            let y: f64 = parts[2].trim().parse().unwrap_or(0.0);
+                            let radius: f64 = parts[3].trim().parse().unwrap_or(0.0);
 
                             self.server_addr.do_send(NearbyStationsRequestMessage {
                                 location: Location { x, y },

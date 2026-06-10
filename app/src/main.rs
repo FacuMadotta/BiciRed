@@ -32,7 +32,7 @@ fn main() {
     let server_addrs: Vec<String> = server_nodes.into_iter().map(|node| node.addr).collect();
 
     let mut app = AppClient::new(99, server_addrs);
-    let test_station_ip = "127.0.0.1:9000"; // yo lo estoy probando con el comando ns 127.0.0.1:8080 y mandandole mensajes que puede hacer la estación. Pero la misma idea que el servidor con el id de estacion, cant de bicis, etc (formato, id_estacion, ip, puerto, cantidad_bicis, cantidad_slots)
+    let test_station_ip = "127.0.0.1:9000"; // Lo manda el servidor internamente; y poder saber cuál es la ip.
 
     let mut input = String::new();
 
@@ -57,7 +57,7 @@ fn main() {
         }
 
         match input.trim() {
-            "1" => app.query_central(Location { x: 10.0, y: 20.0 }, 5.0),
+            "1" => app.query_central(Location { x: 10.5, y: 20.0 }, 5.0),
             "2" => {
                 let mut card_input = String::new();
 

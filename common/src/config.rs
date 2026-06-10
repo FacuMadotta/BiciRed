@@ -57,10 +57,10 @@ pub fn load_stations_csv(
             if let Ok(id) = parts[0].parse::<StationId>() {
                 if id == target_id {
                     let ip = parts[1].to_string();
-                    let slots = parts[2].parse().unwrap_or(10);
-                    let bikes = parts[3].parse().unwrap_or(5);
-                    let x = parts[4].parse().unwrap_or(0.0);
-                    let y = parts[5].parse().unwrap_or(0.0);
+                    let slots = parts[2].trim().parse().unwrap_or(10);
+                    let bikes = parts[3].trim().parse().unwrap_or(5);
+                    let x: f64 = parts[4].trim().parse().unwrap_or(0.0);
+                    let y: f64 = parts[5].trim().parse().unwrap_or(0.0);
                     return Some((ip, slots, bikes, Location { x, y }));
                 }
             }
