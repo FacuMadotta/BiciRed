@@ -413,7 +413,12 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
     fn handle(&mut self, msg: NearbyStationsRequestMessage, _ctx: &mut Context<Self>) {
         let mut nearby = Vec::new();
         if self.is_leader {
-            let replica_addr = self.peer_addrs.values().next().cloned().unwrap_or_default();
+            let replica_addr = self.peer_addrs
+                .iter()
+                .filter(|(&id, _)| id != self.server_id)
+                .map(|(_, addr)| addr.clone())
+                .next()
+                .unwrap_or_default();
             msg.response_addr
                 .do_send(RejectNotReplicaMessage { replica_addr });
             return;
