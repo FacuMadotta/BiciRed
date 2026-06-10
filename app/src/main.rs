@@ -32,8 +32,6 @@ fn main() {
     let server_addrs: Vec<String> = server_nodes.into_iter().map(|node| node.addr).collect();
 
     let mut app = AppClient::new(99, server_addrs);
-    let test_station_ip = "127.0.0.1:9000"; // Lo manda el servidor internamente; y poder saber cuál es la ip.
-
     let mut input = String::new();
 
     println!(

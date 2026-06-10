@@ -5,6 +5,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
+use std::io::Read;
 use std::sync::mpsc::Sender;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -101,22 +102,27 @@ pub struct TransactionState {
 
 pub struct StationActor {
     station: Station,
-    central_server: TcpStream,
+    central_server: Option<TcpStream>,
     payment_service: Sender<String>,
     pending_transactions: HashMap<String, TransactionState>,
+    server_addrs: Vec<String>,
+    my_ip: String,
 }
 
 impl StationActor {
     pub fn new(
         station: Station,
-        central_server: TcpStream,
         payment_service: Sender<String>,
+        server_addrs: Vec<String>,
+        my_ip: String,
     ) -> Self {
         Self {
             station,
-            central_server,
+            central_server: None,
             payment_service,
             pending_transactions: HashMap::new(),
+            server_addrs,
+            my_ip,
         }
     }
 
@@ -157,6 +163,8 @@ impl StationActor {
 
                 let msg_serialized = commit_msg.serialize();
                 self.send_msg_to_payment(msg_serialized);
+
+                self.sync_with_central();
             }
         }
     }
@@ -271,10 +279,11 @@ impl StationActor {
                             as UserId,
                     };
                     let central_msg_serialized = central_msg.serialize();
-                    let central_ok = self
-                        .central_server
-                        .write_all(central_msg_serialized.as_bytes())
-                        .is_ok();
+                    let central_ok = if let Some(ref mut stream) = self.central_server {
+                        stream.write_all(central_msg_serialized.as_bytes()).is_ok()
+                    } else {
+                        false 
+                    };
 
                     // 3. Verificamos que AMBOS se hayan enterado
                     if payment_ok && central_ok {
@@ -331,10 +340,11 @@ impl StationActor {
 
                     let central_msg_serialized = central_msg.serialize();
 
-                    let central_ok = self
-                        .central_server
-                        .write_all(central_msg_serialized.as_bytes())
-                        .is_ok();
+                    let central_ok = if let Some(ref mut stream) = self.central_server {
+                        stream.write_all(central_msg_serialized.as_bytes()).is_ok()
+                    } else {
+                        false 
+                    };
 
                     if payment_ok && central_ok {
                         println!("Devolución offline {} sincronizada con Payment y CentralServer exitosamente", rental_id);
@@ -357,6 +367,69 @@ impl StationActor {
         self.process_charges();
         self.process_rents();
     }
+
+    fn sync_with_central(&mut self) {
+        let available_bikes = self.station.slots.iter().filter(|s| !matches!(s.state, SlotState::Empty)).count();
+        let free_slots = self.station.slots.len() - available_bikes;
+    
+        let status = StationStatus {
+            station_id: self.station.id,
+            location: Location { x: self.station.location.x, y: self.station.location.y },
+            available_bikes: available_bikes as u8,
+            free_slots: free_slots as u8,
+            updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            station_addr: self.my_ip.clone(),
+        };
+    
+        let update_msg = StationUpdate { station: status };
+        let payload = format!("{}\n", update_msg.serialize());
+    
+        if let Some(ref mut stream) = self.central_server {
+            if stream.write_all(payload.as_bytes()).is_err() {
+                println!("[RED] Conexión perdida con el Líder. Reconectando...");
+                self.reconnect_to_leader(payload);
+            } else {
+                println!("[CENTRAL] Estado sincronizado exitosamente.");
+            }
+        } else {
+            println!("[NUEVA CONEXIÓN] Buscando Líder en la red...");
+            self.reconnect_to_leader(payload);
+        }
+    }
+    
+    fn reconnect_to_leader(&mut self, payload: String) {
+        let mut server_idx = 0;
+        loop {
+            let target_ip = &self.server_addrs[server_idx];
+            println!("[RECONEXIÓN] Probando nodo {}...", target_ip);
+    
+            if let Ok(mut stream) = TcpStream::connect(target_ip) {
+                if stream.write_all(payload.as_bytes()).is_ok() {
+                    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+                    let mut buf = [0u8; 1024];
+                    
+                    match stream.read(&mut buf) {
+                        Ok(n) if n > 0 => {
+                            let response = String::from_utf8_lossy(&buf[..n]);
+                            if response.starts_with("NOT_LEADER") {
+                                server_idx = (server_idx + 1) % self.server_addrs.len();
+                                continue;
+                            }
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                            println!("[RECONEXIÓN] ¡Nuevo Líder encontrado en {}!", target_ip);
+                            stream.set_read_timeout(None).unwrap();
+                            self.central_server = Some(stream);
+                            return;
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            server_idx = (server_idx + 1) % self.server_addrs.len();
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
 }
 
 impl Actor for StationActor {
@@ -364,6 +437,8 @@ impl Actor for StationActor {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         println!("StationActor iniciado. Registrando worker de BatchUpdate periódico...");
+
+        self.sync_with_central();
 
         ctx.run_interval(std::time::Duration::from_secs(10), |act, _ctx| {
             act.process_batch_updates();
@@ -483,6 +558,8 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
                     .expect("Error al obtener tiempo")
                     .as_secs(),
             });
+
+            self.sync_with_central();
         } else {
             msg.response.do_send(ReturnRejected {
                 reason: "Slot no está libre".to_string(),
