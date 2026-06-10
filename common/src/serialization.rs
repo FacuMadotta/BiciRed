@@ -150,6 +150,41 @@ impl Serializable for PreparePayment {
     }
 }
 
+impl Serializable for ReservePayment {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}|{}",
+            MessageType::ReservePayment.as_str(),
+            self.transaction_id,
+            self.amount_cents,
+            self.card_token
+        )
+    }
+}
+
+impl Serializable for OfflineRent {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}|{}",
+            MessageType::OfflineRent.as_str(),
+            self.rental_id,
+            self.bike_id,
+            self.user_id
+        )
+    }
+}
+
+impl Serializable for ReturnRent {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            MessageType::ReturnRent.as_str(),
+            self.rental_id,
+            self.bike_id
+        )
+    }
+}
+
 impl<T: TransactionMessage> Serializable for T {
     fn serialize(&self) -> String {
         format!("{}|{}", T::message_type().as_str(), self.transaction_id())

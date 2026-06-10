@@ -21,6 +21,9 @@ pub enum MessageType {
     NotReplica,
     Prepare,
     NotLeader,
+    ReservePayment,
+    OfflineRent,
+    ReturnRent,
 }
 
 impl MessageType {
@@ -47,6 +50,9 @@ impl MessageType {
             Self::NotReplica => "NOT_REPLICA",
             Self::Prepare => "PREPARE",
             Self::NotLeader => "NOT_LEADER",
+            Self::ReservePayment => "RESERVE_PAYMENT",
+            Self::OfflineRent => "OFFLINE_RENT",
+            Self::ReturnRent => "RETURN_RENT",
         }
     }
 
@@ -73,6 +79,9 @@ impl MessageType {
             "NOT_REPLICA" => Some(Self::NotReplica),
             "PREPARE" => Some(Self::Prepare),
             "NOT_LEADER" => Some(Self::NotLeader),
+            "RESERVE_PAYMENT" => Some(Self::ReservePayment),
+            "OFFLINE_RENT" => Some(Self::OfflineRent),
+            "RETURN_RENT" => Some(Self::ReturnRent),
             _ => None,
         }
     }

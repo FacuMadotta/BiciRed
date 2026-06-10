@@ -228,3 +228,26 @@ impl TransactionMessage for Prepare {
         MessageType::Prepare
     }
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ReservePayment {
+    pub transaction_id: String,
+    pub amount_cents: u32,
+    pub card_token: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct OfflineRent {
+    pub rental_id: String,
+    pub bike_id: BikeId,
+    pub user_id: UserId,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ReturnRent {
+    pub rental_id: String,
+    pub bike_id: BikeId,
+}

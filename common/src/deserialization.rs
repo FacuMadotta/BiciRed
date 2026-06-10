@@ -178,6 +178,41 @@ impl Deserializable for StationStatus {
     }
 }
 
+impl Deserializable for ReservePayment {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 4);
+        Self {
+            transaction_id: parts[1].parse().expect("Invalid transaction_id"),
+            amount_cents: parts[2].parse().expect("Invalid amount_cents"),
+            card_token: parts[3].to_string(),
+        }
+    }
+}
+
+impl Deserializable for OfflineRent {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 4);
+        Self {
+            rental_id: parts[1].parse().expect("Invalid rental_id"),
+            bike_id: parts[2].parse().expect("Invalid bike_id"),
+            user_id: parts[3].parse().expect("Invalid user_id"),
+        }
+    }
+}
+
+impl Deserializable for ReturnRent {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 3);
+        Self {
+            rental_id: parts[1].parse().expect("Invalid rental_id"),
+            bike_id: parts[2].parse().expect("Invalid bike_id"),
+        }
+    }
+}
+
 impl Deserializable for PreparePayment {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();

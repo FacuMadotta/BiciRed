@@ -63,13 +63,17 @@ fn main() {
                     println!("Primero tenés que consultar las estaciones (Opción 1).");
                     continue;
                 }
-            
+
                 let mut station_input = String::new();
                 print!("> Ingresá el ID de la estación: ");
                 io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut station_input).unwrap();
                 let target_id: usize = station_input.trim().parse().unwrap_or(0);
-                let target_addr = app.cached_stations.iter().find(|s| s.station_id == target_id as u32).map(|s| s.station_addr.clone());
+                let target_addr = app
+                    .cached_stations
+                    .iter()
+                    .find(|s| s.station_id == target_id as u32)
+                    .map(|s| s.station_addr.clone());
 
                 if let Some(addr) = target_addr {
                     let mut slot_input = String::new();
