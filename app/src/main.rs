@@ -59,13 +59,34 @@ fn main() {
         match input.trim() {
             "1" => app.query_central(Location { x: 10.5, y: 20.0 }, 5.0),
             "2" => {
-                let mut card_input = String::new();
-
-                print!("> Ingresá tu token de tarjeta: ");
+                if app.cached_stations.is_empty() {
+                    println!("Primero tenés que consultar las estaciones (Opción 1).");
+                    continue;
+                }
+            
+                let mut station_input = String::new();
+                print!("> Ingresá el ID de la estación: ");
                 io::stdout().flush().unwrap();
-                io::stdin().read_line(&mut card_input).unwrap();
+                io::stdin().read_line(&mut station_input).unwrap();
+                let target_id: usize = station_input.trim().parse().unwrap_or(0);
+                let target_addr = app.cached_stations.iter().find(|s| s.station_id == target_id as u32).map(|s| s.station_addr.clone());
 
-                app.rent_station(test_station_ip, 0, card_input.trim());
+                if let Some(addr) = target_addr {
+                    let mut slot_input = String::new();
+                    print!("> Ingresá el número de slot: ");
+                    io::stdout().flush().unwrap();
+                    io::stdin().read_line(&mut slot_input).unwrap();
+                    let slot_index: usize = slot_input.trim().parse().unwrap_or(0);
+
+                    let mut card_input = String::new();
+                    print!("> Ingresá tu token de tarjeta: ");
+                    io::stdout().flush().unwrap();
+                    io::stdin().read_line(&mut card_input).unwrap();
+
+                    app.rent_station(&addr, slot_index, card_input.trim());
+                } else {
+                    println!("Estación no encontrada en la caché local.");
+                }
             }
             "3" => app.return_station(test_station_ip, 1),
             "4" => {

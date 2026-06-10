@@ -180,7 +180,7 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
             let prepare_msg = PreparePayment {
                 card_token: msg.request.card_token.clone(),
                 amount_cents: 100, // harcodeo inicial
-                transaction_id: rental_id,
+                transaction_id: rental_id.clone(),
             };
 
             self.pending_transactions.insert(
@@ -198,7 +198,9 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
             let msg_serialized = prepare_msg.serialize();
             self.send_msg_to_payment(msg_serialized);
 
-            msg.response.do_send(prepare_msg);
+            msg.response.do_send(Prepare {
+                transaction_id: rental_id,
+            });
         } else {
             msg.response.do_send(RentRejected {
                 reason: "Bici no disponible".to_string(),

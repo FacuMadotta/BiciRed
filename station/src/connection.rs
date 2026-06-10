@@ -145,6 +145,13 @@ impl Handler<PreparePayment> for ConnectionActor {
         self.send_response(msg);
     }
 }
+impl Handler<Prepare> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: Prepare, _ctx: &mut Self::Context) {
+        self.send_response(msg);
+    }
+}
 
 // Actor que permite levantar un nuevo ConnectionActor por cada nueva conexión entrante, recibiendo los sockets desde el Acceptor.
 pub struct SpawnerActor {

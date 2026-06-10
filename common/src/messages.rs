@@ -210,3 +210,21 @@ where
 {
     type Result = ();
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Prepare {
+    pub transaction_id: String,
+}
+
+impl TransactionMessage for Prepare {
+    fn new(id: String) -> Self {
+        Self { transaction_id: id }
+    }
+    fn transaction_id(&self) -> String {
+        self.transaction_id.clone()
+    }
+    fn message_type() -> MessageType {
+        MessageType::Prepare
+    }
+}

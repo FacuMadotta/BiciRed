@@ -186,10 +186,14 @@ impl AppClient {
             return;
         }
 
+        let parts: Vec<&str> = prepare_text.split('|').collect();
+
+        let transaction_id = parts[1];
+
         let vote = if self.current_rental.is_some() {
-            "VOTE_ABORT|Reserva activa"
+            format!("VOTE_ABORT|{}", transaction_id)
         } else {
-            "VOTE_COMMIT"
+            format!("VOTE_COMMIT|{}", transaction_id)
         };
 
         if let Err(e) = stream.write_all(vote.as_bytes()) {
