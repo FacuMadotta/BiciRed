@@ -92,7 +92,39 @@ fn main() {
                     println!("Estación no encontrada en la caché local.");
                 }
             }
-            "3" => app.return_station(test_station_ip, 1),
+            "3" => {
+                if app.current_rental.is_none() {
+                    println!("\n[ERROR] No tenés ninguna bici alquilada actualmente.");
+                    continue;
+                }
+
+                if app.cached_stations.is_empty() {
+                    println!("Primero tenés que consultar las estaciones (Opción 1) para buscar a dónde devolverla.");
+                    continue;
+                }
+            
+                let mut station_input = String::new();
+                print!("> Ingresá el ID de la estación para devolver la bici: ");
+                io::stdout().flush().unwrap();
+                io::stdin().read_line(&mut station_input).unwrap();
+                let target_id: usize = station_input.trim().parse().unwrap_or(0);
+            
+                let target_addr = app.cached_stations
+                    .iter()
+                    .find(|s| s.station_id == target_id as u32)
+                    .map(|s| s.station_addr.clone());
+            
+                if let Some(addr) = target_addr {
+                    let mut slot_input = String::new();
+                    print!("> Ingresá el número de slot libre: ");
+                    io::stdout().flush().unwrap();
+                    io::stdin().read_line(&mut slot_input).unwrap();
+                    let slot_index: usize = slot_input.trim().parse().unwrap_or(0);
+                    app.return_station(&addr, slot_index);
+                } else {
+                    println!("Estación no encontrada en la caché local.");
+                }
+            },
             "4" => {
                 println!("Cerrando aplicación...");
                 break;
