@@ -676,3 +676,15 @@ impl Handler<VoteAbort> for StationActor {
         }
     }
 }
+
+impl Handler<ReservationRejected> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
+        let return_msg = RentRejected {
+            reason: format!("Reserva rechazada por Payment: {}", msg.reason),
+        };
+
+        // Enviar mensaje a central server para que bloquee al usuario
+    }
+}
