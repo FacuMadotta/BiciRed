@@ -89,6 +89,14 @@ impl Station {
             slot.state = SlotState::Occupied { bike_id }; // Marcar el slot como ocupado con la bicicleta devuelta
         }
     }
+
+    fn cancel_reservation(&mut self, slot_index: usize, bike_id: BikeId) {
+        if let Some(slot) = self.slots.get_mut(slot_index) {
+            if let SlotState::Reserved = slot.state {
+                slot.state = SlotState::Occupied { bike_id }; // Volver al estado ocupado con la misma bicicleta
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -162,7 +170,7 @@ impl StationActor {
                 };
 
                 let msg_serialized = commit_msg.serialize();
-                self.send_msg_to_payment(msg_serialized);
+                let _ = self.send_msg_to_payment(msg_serialized);
 
                 self.sync_with_central();
             }
@@ -600,8 +608,10 @@ impl Handler<RequestMessage<VoteAbort, ConnectionActor>> for StationActor {
         let rollback_msg = rollback_msg.serialize();
         let _ = self.send_msg_to_payment(rollback_msg); //ignoramos, por timeout rollbackeara
 
-        self.pending_transactions
-            .remove(&msg.request.transaction_id);
+        let transaction = self.pending_transactions.remove(&msg.request.transaction_id);
+        if let Some(tx) = transaction {
+            self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+        }
     }
 }
 
@@ -629,8 +639,9 @@ impl Handler<VoteAbort> for StationActor {
             tx.client_addr.do_send(return_msg);
         }
 
-        self.pending_transactions.remove(&msg.transaction_id);
+        let transaction = self.pending_transactions.remove(&msg.transaction_id);
+        if let Some(tx) = transaction {
+            self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+        }
     }
 }
-
-// Conexion con central server
