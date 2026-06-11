@@ -24,9 +24,17 @@ impl AppClient {
         let mut rng = rand::thread_rng();
         let initial_server = servers.choose(&mut rng).cloned().unwrap_or_default();
 
+        let file_path = format!("rental_state_{}.json", user_id);
+        let current_rental = if let Ok(content) = std::fs::read_to_string(&file_path) {
+            println!("[OFFLINE/ONLINE] Encontrado alquiler activo previo en disco. Restaurando estado...");
+            serde_json::from_str::<ActiveRental>(&content).ok()
+        } else {
+            None
+        };
+
         Self {
             user_id,
-            current_rental: None,
+            current_rental,
             cached_stations: Vec::new(),
             is_blocked: false,
             central_servers: servers,
@@ -226,6 +234,15 @@ impl AppClient {
                     pre_auth_cents: conf.pre_auth_cents,
                     station_id: 0,
                 });
+
+                let file_path = format!("rental_state_{}.json", self.user_id);
+                if let Ok(json_content) = serde_json::to_string(&self.current_rental) {
+                    if let Err(e) = std::fs::write(&file_path, json_content) {
+                        eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}", e);
+                    } else {
+                        println!("[OFFLINE/ONLINE] Alquiler respaldado en disco de forma segura.");
+                    }
+                }
             }
             MessageType::RentRejected => {
                 let rej = RentRejected::deserialize(&final_text);
@@ -265,6 +282,10 @@ impl AppClient {
                             conf.charged_cents
                         );
                         self.current_rental = None;
+
+                        let file_path = format!("rental_state_{}.json", self.user_id);
+                        let _ = std::fs::remove_file(file_path);
+                        println!("[OFFLINE/ONLINE] Historial de alquiler limpiado del disco.");
                     }
                     MessageType::ReturnRejected => {
                         let rej = ReturnRejected::deserialize(text);
