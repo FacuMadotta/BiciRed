@@ -239,6 +239,13 @@ pub struct ReservePayment {
 
 #[derive(Message)]
 #[rtype(result = "()")]
+pub struct ReservationRejected {
+    pub transaction_id: String,
+    pub reason: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct OfflineRent {
     pub rental_id: String,
     pub bike_id: BikeId,

@@ -190,6 +190,17 @@ impl Deserializable for ReservePayment {
     }
 }
 
+impl Deserializable for ReservationRejected {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 3);
+        Self {
+            transaction_id: parts[1].parse().expect("Invalid transaction_id"),
+            reason: parts[2].to_string(),
+        }
+    }
+}
+
 impl Deserializable for OfflineRent {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();

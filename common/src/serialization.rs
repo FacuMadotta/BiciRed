@@ -162,6 +162,17 @@ impl Serializable for ReservePayment {
     }
 }
 
+impl Serializable for ReservationRejected {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            MessageType::ReservationRejected.as_str(),
+            self.transaction_id,
+            self.reason
+        )
+    }
+}
+
 impl Serializable for OfflineRent {
     fn serialize(&self) -> String {
         format!(

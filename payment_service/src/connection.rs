@@ -94,6 +94,9 @@ impl Handler<IncomingData> for ConnectionActor {
                 MessageType::RollbackPayment => {
                     self.send_message::<RollbackPayment>(message_text, ctx)
                 }
+                MessageType::ReservePayment => {
+                    self.send_message::<ReservePayment>(message_text, ctx)
+                }
                 _ => {
                     println!("Mensaje desconocido recibido: {}", message_text);
                 }
@@ -126,6 +129,18 @@ impl Handler<VoteAbort> for ConnectionActor {
     }
 }
 
+impl Handler<ReservationRejected> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
+        println!(
+            "[BANK] Enviando ReservationRejected para transaction_id {}: {}",
+            msg.transaction_id, msg.reason
+        );
+        self.send_response(msg);
+    }
+}
+
 impl Handler<ConnectionClosed> for ConnectionActor {
     type Result = ();
 
@@ -152,3 +167,4 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
         ConnectionActor::new(msg.0, self.payment_service_addr.clone()).start();
     }
 }
+

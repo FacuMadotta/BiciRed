@@ -22,6 +22,7 @@ pub enum MessageType {
     Prepare,
     NotLeader,
     ReservePayment,
+    ReservationRejected,
     OfflineRent,
     ReturnRent,
 }
@@ -51,6 +52,7 @@ impl MessageType {
             Self::Prepare => "PREPARE",
             Self::NotLeader => "NOT_LEADER",
             Self::ReservePayment => "RESERVE_PAYMENT",
+            Self::ReservationRejected => "RESERVATION_REJECTED",
             Self::OfflineRent => "OFFLINE_RENT",
             Self::ReturnRent => "RETURN_RENT",
         }
@@ -80,6 +82,7 @@ impl MessageType {
             "PREPARE" => Some(Self::Prepare),
             "NOT_LEADER" => Some(Self::NotLeader),
             "RESERVE_PAYMENT" => Some(Self::ReservePayment),
+            "RESERVATION_REJECTED" => Some(Self::ReservationRejected),
             "OFFLINE_RENT" => Some(Self::OfflineRent),
             "RETURN_RENT" => Some(Self::ReturnRent),
             _ => None,

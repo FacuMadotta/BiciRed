@@ -34,6 +34,16 @@ impl PaymentServiceActor {
             cards,
         }
     }
+
+    fn take_money(&mut self, card_token: &str, amount: u32) -> bool {
+        if let Some(saldo) = self.cards.get_mut(card_token) {
+            if *saldo >= amount {
+                *saldo -= amount;
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 impl Actor for PaymentServiceActor {
@@ -73,21 +83,18 @@ impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentService
         let card_token = &msg.request.card_token;
         let amount = msg.request.amount_cents;
 
-        if let Some(saldo) = self.cards.get_mut(card_token) {
-            if *saldo >= amount {
-                *saldo -= amount;
-                self.transactions.insert(
-                    msg.request.transaction_id.clone(),
-                    Transaction {
-                        card_token: card_token.clone(),
-                        amount_cents: amount,
-                        status: TransactionStatus::PreAuthorized,
-                    },
-                );
-                msg.response
-                    .do_send(VoteCommit::new(msg.request.transaction_id));
-                return;
-            }
+        if self.take_money(card_token, amount) {
+            self.transactions.insert(
+                msg.request.transaction_id.clone(),
+                Transaction {
+                    card_token: card_token.clone(),
+                    amount_cents: amount,
+                    status: TransactionStatus::PreAuthorized,
+                },
+            );
+            msg.response
+                .do_send(VoteCommit::new(msg.request.transaction_id));
+            return;
         }
         msg.response
             .do_send(VoteAbort::new(msg.request.transaction_id));
@@ -154,5 +161,35 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
                 transaction.status = TransactionStatus::Captured;
             }
         }
+    }
+}
+
+impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentServiceActor {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: RequestMessage<ReservePayment, ConnectionActor>,
+        _ctx: &mut Self::Context,
+    ) {
+        println!(
+            "[BANK] Recibiendo ReservePayment para transaction_id {}",
+            msg.request.transaction_id
+        );
+        self.transactions.insert(
+            msg.request.transaction_id.clone(),
+            Transaction {
+                card_token: msg.request.card_token.clone(),
+                amount_cents: msg.request.amount_cents,
+                status: TransactionStatus::Captured, 
+            },
+        );
+        if !self.take_money(&msg.request.card_token, msg.request.amount_cents) {
+            msg.response
+                .do_send(ReservationRejected {
+                    transaction_id: msg.request.transaction_id.clone(),
+                    reason: "Fondos insuficientes".to_string(),
+                });
+        } 
     }
 }
