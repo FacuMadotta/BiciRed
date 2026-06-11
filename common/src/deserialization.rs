@@ -244,3 +244,14 @@ impl<T: TransactionMessage> Deserializable for T {
         Self::new(id)
     }
 }
+
+impl Deserializable for CapturePayment {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 3);
+        Self {
+            transaction_id: parts[1].parse().expect("Invalid transaction_id"),
+            amount_cents: parts[2].parse().expect("Invalid amount_cents"),
+        }
+    }
+}

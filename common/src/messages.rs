@@ -166,18 +166,7 @@ impl TransactionMessage for CommitPayment {
 #[rtype(result = "()")]
 pub struct CapturePayment {
     pub transaction_id: String,
-}
-
-impl TransactionMessage for CapturePayment {
-    fn new(id: String) -> Self {
-        Self { transaction_id: id }
-    }
-    fn transaction_id(&self) -> String {
-        self.transaction_id.clone()
-    }
-    fn message_type() -> MessageType {
-        MessageType::CapturePayment
-    }
+    pub amount_cents: u32,
 }
 
 #[derive(Message)]

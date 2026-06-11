@@ -196,6 +196,17 @@ impl Serializable for ReturnRent {
     }
 }
 
+impl Serializable for CapturePayment {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            MessageType::CapturePayment.as_str(),
+            self.transaction_id,
+            self.amount_cents
+        )
+    }
+}
+
 impl<T: TransactionMessage> Serializable for T {
     fn serialize(&self) -> String {
         format!("{}|{}", T::message_type().as_str(), self.transaction_id())

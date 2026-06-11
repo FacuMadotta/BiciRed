@@ -12,7 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const PENDING_RENTS_PREFIX: &str = "pending_rents_";
 const PENDING_CHARGES_PREFIX: &str = "pending_charges_";
 const TIMEOUT_SECS: u64 = 30; // Tiempo máximo para esperar un commit antes de abortar la transacción
-const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Harcodeo inicial para pre-autorización
+const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Monto filo de Pre Autorización 
+const AMOUNT_PER_MINUTE_CENTS: u32 = 50; // Costo por minuto de alquiler
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
 pub struct Station {
@@ -98,6 +99,12 @@ impl Station {
             }
         }
     }
+
+    fn calculate_amount(&self, start_secs: u64, end_secs: u64) -> u32 {
+        let duration_secs = end_secs.saturating_sub(start_secs);
+        let minutes = duration_secs.div_ceil(60);
+        minutes as u32 * AMOUNT_PER_MINUTE_CENTS as u32
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -163,7 +170,10 @@ impl StationActor {
                 tx.client_addr.do_send(RentConfirmed {
                     bike_id: tx.bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
-                    timestamp_secs: 0, // Harcodeo inicial
+                    timestamp_secs: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Error al obtener tiempo")
+                        .as_secs(),
                     rental_id: transaction_id.to_string(),
                 });
 
@@ -204,7 +214,7 @@ impl StationActor {
         )
     }
 
-    fn get_json_charge(&self, rental_id: &str, amount_cents: u64, bike_id: BikeId) -> String {
+    fn get_json_charge(&self, rental_id: &str, amount_cents: u32, bike_id: BikeId) -> String {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Error al obtener tiempo")
@@ -233,7 +243,7 @@ impl StationActor {
             .expect("Error al guardar alquiler pendiente");
     }
 
-    fn save_pending_charge(&self, rental_id: &str, amount_cents: u64, bike_id: BikeId) {
+    fn save_pending_charge(&self, rental_id: &str, amount_cents: u32, bike_id: BikeId) {
         let filename = self.get_charges_filename();
         let charge_json = self.get_json_charge(rental_id, amount_cents, bike_id);
 
@@ -335,6 +345,10 @@ impl StationActor {
                         .to_string();
                     let capture_msg = CapturePayment {
                         transaction_id: rental_id.clone(),
+                        amount_cents: charge
+                            .get("amount_cents")
+                            .and_then(|v| v.as_u64())
+                            .expect("Error al parsear amount_cents") as u32,
                     };
                     let msg_serialized = capture_msg.serialize();
                     let payment_ok = self.send_msg_to_payment(msg_serialized).is_ok();
@@ -572,11 +586,18 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
         let slot = msg.request.slot_index;
         let bike_id = msg.request.bike_id;
         let rental_id = msg.request.rental_id.clone();
+        let started_at_secs = msg.request.started_at_secs;
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Error al obtener tiempo")
+            .as_secs();
 
         if self.station.is_slot_free(slot) {
             self.station.return_bike(slot, bike_id);
+            let amount_cents = self.station.calculate_amount(started_at_secs, now_secs);
             let capture_msg = CapturePayment {
                 transaction_id: rental_id,
+                amount_cents,
             };
 
             let payment_msg = capture_msg.serialize();
@@ -587,15 +608,12 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
                     // --- FLUJO OFFLINE
                     println!("[ALERTA OFFLINE] Falló comunicación con Payment durante devolución. Registrando cobro diferido...");
 
-                    self.save_pending_charge(&msg.request.rental_id, 150, bike_id); // Harcodeo inicial para cargo pendiente
+                    self.save_pending_charge(&msg.request.rental_id, amount_cents, bike_id); 
                 }
             }
             msg.response.do_send(ReturnConfirmed {
-                charged_cents: 150, // Harcodeo inicial para cargo final, iria calculate_amount()
-                timestamp_secs: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Error al obtener tiempo")
-                    .as_secs(),
+                charged_cents: amount_cents, 
+                timestamp_secs: now_secs,
             });
 
             self.sync_with_central();

@@ -156,11 +156,32 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
             "[BANK] Recibiendo CapturePayment para transaction_id {}",
             msg.request.transaction_id
         );
-        if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
-            if transaction.status == TransactionStatus::Commited {
+        let (card_token, amount_cents, status) =
+            if let Some(transaction) = self.transactions.get(&msg.request.transaction_id) {
+                (
+                    transaction.card_token.clone(),
+                    transaction.amount_cents,
+                    transaction.status.clone(),
+                )
+            } else {
+                return;
+            };
+
+        if status == TransactionStatus::Commited
+            && self.take_money(&card_token, amount_cents)
+        {
+            if let Some(transaction) =
+                self.transactions.get_mut(&msg.request.transaction_id)
+            {
                 transaction.status = TransactionStatus::Captured;
             }
+            return;
         }
+
+        msg.response.do_send(ReservationRejected {
+            transaction_id: msg.request.transaction_id.clone(),
+            reason: "Fondos insuficientes para captura".to_string(),
+        });
     }
 }
 
