@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const PENDING_RENTS_PREFIX: &str = "pending_rents_";
 const PENDING_CHARGES_PREFIX: &str = "pending_charges_";
+const TIMEOUT_SECS: u64 = 30; // Tiempo máximo para esperar un commit antes de abortar la transacción
 const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Harcodeo inicial para pre-autorización
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
@@ -105,7 +106,8 @@ pub struct TransactionState {
     pub bike_id: BikeId,
     pub client_addr: Addr<ConnectionActor>, // Para saber a qué ConnectionActor responderle al final
     pub payment_voted_commit: bool,
-    pub central_voted_commit: bool,
+    pub app_voted_commit: bool,
+    pub started_at: SystemTime,
 }
 
 pub struct StationActor {
@@ -136,7 +138,7 @@ impl StationActor {
 
     fn generate_rental_id(&self, bike_id: BikeId, user_id: UserId) -> String {
         match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(n) => format!("{}-{}-{}", bike_id, user_id, n.as_secs()),
+            Ok(n) => format!("{}-{}-{}", bike_id, user_id, n.as_millis()),
             Err(_) => format!("{}-{}-{}", bike_id, user_id, 0), // fallback en caso de error
         }
     }
@@ -152,7 +154,7 @@ impl StationActor {
         if self
             .pending_transactions
             .get(transaction_id)
-            .map(|tx| tx.payment_voted_commit && tx.central_voted_commit)
+            .map(|tx| tx.payment_voted_commit && tx.app_voted_commit)
             .unwrap_or(false)
         {
             // Si ambos votaron commit, confirmamos el alquiler
@@ -202,14 +204,14 @@ impl StationActor {
         )
     }
 
-    fn get_json_charge(&self, rental_id: &str, amount_cents: u64) -> String {
+    fn get_json_charge(&self, rental_id: &str, amount_cents: u64, bike_id: BikeId) -> String {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Error al obtener tiempo")
             .as_secs();
         format!(
-            "{{\"rental_id\":\"{}\",\"amount_cents\":{},\"timestamp\":{}}}\n",
-            rental_id, amount_cents, timestamp
+            "{{\"rental_id\":\"{}\",\"amount_cents\":{},\"bike_id\":{},\"timestamp\":{}}}\n",
+            rental_id, amount_cents, bike_id, timestamp
         )
     }
 
@@ -231,9 +233,9 @@ impl StationActor {
             .expect("Error al guardar alquiler pendiente");
     }
 
-    fn save_pending_charge(&self, rental_id: &str, amount_cents: u64) {
+    fn save_pending_charge(&self, rental_id: &str, amount_cents: u64, bike_id: BikeId) {
         let filename = self.get_charges_filename();
-        let charge_json = self.get_json_charge(rental_id, amount_cents);
+        let charge_json = self.get_json_charge(rental_id, amount_cents, bike_id);
 
         std::fs::OpenOptions::new()
             .create(true)
@@ -438,6 +440,35 @@ impl StationActor {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
+
+    fn abort_expired_transactions(&mut self) {
+        let now = SystemTime::now();
+        let expired_transactions: Vec<String> = self.pending_transactions.iter()
+            .filter_map(|(tx_id, tx)| {
+                if now.duration_since(tx.started_at).unwrap_or_default().as_secs() > TIMEOUT_SECS {
+                    Some(tx_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        for tx_id in expired_transactions {
+            if let Some(tx) = self.pending_transactions.remove(&tx_id) {
+                println!("[TIMEOUT] Transacción {} expirada. Abortando...", tx_id);
+                let rollback_msg = RollbackPayment {
+                    transaction_id: tx_id.clone(),
+                };
+                let rollback_msg_serialized = rollback_msg.serialize();
+                let _ = self.send_msg_to_payment(rollback_msg_serialized);
+
+                self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+                tx.client_addr.do_send(RentRejected {
+                    reason: "Transacción expirada por timeout".to_string(),
+                });
+            }
+        }
+    }
 }
 
 impl Actor for StationActor {
@@ -450,6 +481,7 @@ impl Actor for StationActor {
 
         ctx.run_interval(std::time::Duration::from_secs(10), |act, _ctx| {
             act.process_batch_updates();
+            act.abort_expired_transactions();
         });
     }
 }
@@ -488,7 +520,8 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
                             bike_id: bike_id,
                             client_addr: msg.response.clone(),
                             payment_voted_commit: false,
-                            central_voted_commit: false,
+                            app_voted_commit: false,
+                            started_at: SystemTime::now(),
                         },
                     );
 
@@ -549,14 +582,12 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
             let payment_msg = capture_msg.serialize();
 
             match self.send_msg_to_payment(payment_msg) {
-                Ok(_) => {
-                    // --- FLUJO ONLINE, nose si hace falta que haga algo aca
-                }
+                Ok(_) => {}
                 Err(_) => {
                     // --- FLUJO OFFLINE
                     println!("[ALERTA OFFLINE] Falló comunicación con Payment durante devolución. Registrando cobro diferido...");
 
-                    self.save_pending_charge(&msg.request.rental_id, 150); // Harcodeo inicial para cargo pendiente
+                    self.save_pending_charge(&msg.request.rental_id, 150, bike_id); // Harcodeo inicial para cargo pendiente
                 }
             }
             msg.response.do_send(ReturnConfirmed {
@@ -588,7 +619,7 @@ impl Handler<RequestMessage<VoteCommit, ConnectionActor>> for StationActor {
     ) {
         self.pending_transactions
             .entry(msg.request.transaction_id.clone())
-            .and_modify(|tx| tx.central_voted_commit = true);
+            .and_modify(|tx| tx.app_voted_commit = true);
         self.check_transaction_state(&msg.request.transaction_id);
     }
 }
