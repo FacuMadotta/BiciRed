@@ -9,12 +9,13 @@ use client::AppClient;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        println!("Uso: app <ruta_al_archivo_servers.csv>");
+    if args.len() < 3 {
+        println!("Uso: app <id> <ruta_al_archivo_servers.csv>");
         return;
     }
 
-    let csv_path = &args[1];
+    let id = args[1].parse::<u32>().unwrap_or(0);
+    let csv_path = &args[2];
 
     let server_nodes = match load_servers_csv(csv_path) {
         Ok(nodes) => nodes,
@@ -31,7 +32,7 @@ fn main() {
 
     let server_addrs: Vec<String> = server_nodes.into_iter().map(|node| node.addr).collect();
 
-    let mut app = AppClient::new(99, server_addrs);
+    let mut app = AppClient::new(id, server_addrs);
     let mut input = String::new();
 
     println!(
@@ -55,7 +56,27 @@ fn main() {
         }
 
         match input.trim() {
-            "1" => app.query_central(Location { x: 10.5, y: 20.0 }, 5.0),
+            "1" => {
+                let mut x_input = String::new();
+                print!("> Ingresá tu coordenada X actual: ");
+                io::stdout().flush().unwrap();
+                io::stdin().read_line(&mut x_input).unwrap();
+                let x: f64 = x_input.trim().parse().unwrap_or(0.0);
+
+                let mut y_input = String::new();
+                print!("> Ingresá tu coordenada Y actual: ");
+                io::stdout().flush().unwrap();
+                io::stdin().read_line(&mut y_input).unwrap();
+                let y: f64 = y_input.trim().parse().unwrap_or(0.0);
+
+                let mut r_input = String::new();
+                print!("> Ingresá el radio de búsqueda: ");
+                io::stdout().flush().unwrap();
+                io::stdin().read_line(&mut r_input).unwrap();
+                let radius: f64 = r_input.trim().parse().unwrap_or(5.0);
+
+                app.query_central(Location { x, y}, radius)
+            },
             "2" => {
                 if app.cached_stations.is_empty() {
                     println!("Primero tenés que consultar las estaciones (Opción 1).");
