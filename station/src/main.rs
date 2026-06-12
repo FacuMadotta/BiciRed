@@ -116,6 +116,10 @@ pub fn start_payment_gateway(
                             let vote_msg = VoteAbort::deserialize(message_text);
                             station_addr.do_send(vote_msg);
                         }
+                        MessageType::ReservationRejected => {
+                            let reject_msg = ReservationRejected::deserialize(message_text);
+                            station_addr.do_send(reject_msg);
+                        }
                         _ => {
                             eprintln!(
                                 "Mensaje desconocido recibido del servicio de pagos: {}",

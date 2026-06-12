@@ -137,6 +137,7 @@ pub struct RejectNotReplicaMessage {
 #[rtype(result = "()")]
 pub struct SendReplicaSyncMessage {
     pub station_table: std::collections::HashMap<StationId, StationStatus>,
+    pub banned_users: std::collections::HashMap<UserId, String>,
 }
 
 // Connection --> Central (Réplica)
@@ -144,4 +145,5 @@ pub struct SendReplicaSyncMessage {
 #[rtype(result = "()")]
 pub struct ReplicaSyncMessage {
     pub station_table: std::collections::HashMap<StationId, StationStatus>,
+    pub banned_users: std::collections::HashMap<UserId, String>,
 }

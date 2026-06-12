@@ -1,6 +1,9 @@
 use rand::seq::SliceRandom;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use common::{
+    BanNotification
+};
 
 use common::{
     Deserializable, Location, MessageType, NearbyResponse, RentConfirmed, RentRejected,
@@ -17,6 +20,7 @@ pub struct AppClient {
     pub is_blocked: bool,
     pub central_servers: Vec<String>,
     pub active_server_addr: String,
+    pub actual_rental_id: Option<String>,
 }
 
 impl AppClient {
@@ -39,6 +43,7 @@ impl AppClient {
             is_blocked: false,
             central_servers: servers,
             active_server_addr: initial_server,
+            actual_rental_id: None,
         }
     }
 
@@ -116,7 +121,8 @@ impl AppClient {
                             }
                         }
                         MessageType::BanNotification => {
-                            println!("\n[BAN] Has sido bloqueado por el servidor. Razón: {}", text);
+                            let ban_msg = BanNotification::deserialize(text);
+                            println!("\n[BAN] Has sido bloqueado por el servidor. Razón: {}", ban_msg.reason);
                             self.is_blocked = true;
                             break;
                         }
@@ -202,6 +208,7 @@ impl AppClient {
         let parts: Vec<&str> = prepare_text.split('|').collect();
 
         let transaction_id = parts[1];
+        self.actual_rental_id = Some(transaction_id.to_string());
 
         let vote = if self.current_rental.is_some() {
             format!("VOTE_ABORT|{}", transaction_id)
@@ -271,7 +278,7 @@ impl AppClient {
             bike_id: rental.bike_id,
             slot_index,
             started_at_secs: rental.started_at_secs,
-            rental_id: format!("{}-{}", self.user_id, rental.started_at_secs),
+            rental_id: self.actual_rental_id.clone().unwrap_or_else(|| "unknown".into()),
         };
 
         match Self::send_tcp_request(addr, &req.serialize()) {

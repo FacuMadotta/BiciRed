@@ -160,7 +160,7 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
             if let Some(transaction) = self.transactions.get(&msg.request.transaction_id) {
                 (
                     transaction.card_token.clone(),
-                    transaction.amount_cents,
+                    msg.request.amount_cents,
                     transaction.status.clone(),
                 )
             } else {

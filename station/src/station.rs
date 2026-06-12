@@ -704,7 +704,7 @@ impl Handler<ReservationRejected> for StationActor {
 
     fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
         let client_id = self.client_id_from_rental(&msg.transaction_id);
-
+    
         // Enviar mensaje a central server para que bloquee al usuario
         if let Some(user_id) = client_id {
             let ban_msg = UserBanned {

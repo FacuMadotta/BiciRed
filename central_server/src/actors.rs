@@ -227,7 +227,7 @@ impl Handler<IncomingData> for ConnectionActor {
                         }
                     }
                     "REPLICA_SYNC" => {
-                        if parts.len() >= 2 {
+                        if parts.len() >= 3 {
                             let mut new_table = HashMap::new();
                             if !parts[1].is_empty() {
                                 for st_str in parts[1].split(';') {
@@ -263,8 +263,22 @@ impl Handler<IncomingData> for ConnectionActor {
                                     }
                                 }
                             }
+                            
+                            let mut banned_users = HashMap::new();
+                            if parts.len() >= 3 && !parts[2].is_empty() {
+                                for user_str in parts[2].split(';') {
+                                    let props: Vec<&str> = user_str.split(',').collect();
+                                    if props.len() == 2 {
+                                        if let Ok(user_id) = props[0].parse() {
+                                            banned_users.insert(user_id, props[1].to_string());
+                                        }
+                                    }
+                                }
+                            }
+
                             self.server_addr.do_send(ReplicaSyncMessage {
                                 station_table: new_table,
+                                banned_users: banned_users, 
                             });
                         }
                     }
@@ -389,6 +403,15 @@ impl CentralServerActor {
             users_banned: HashMap::new(),
         }
     }
+
+    fn broadcast_replica_sync(&self) {
+        for peer_con in self.peers.values() {
+            peer_con.do_send(SendReplicaSyncMessage {
+                station_table: self.station_table.clone(),
+                banned_users: self.users_banned.clone(),
+            });
+        }
+    }
 }
 
 impl Actor for CentralServerActor {
@@ -417,11 +440,7 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
         self.station_table
             .insert(msg.station.station_id, msg.station);
 
-        for peer_con in self.peers.values() {
-            peer_con.do_send(SendReplicaSyncMessage {
-                station_table: self.station_table.clone(),
-            });
-        }
+        self.broadcast_replica_sync();
     }
 }
 
@@ -435,6 +454,7 @@ impl Handler<UserBanned> for CentralServerActor {
         );
 
         self.users_banned.insert(msg.user_id, msg.reason.clone());
+        self.broadcast_replica_sync();
     }
 }
 
@@ -597,7 +617,12 @@ impl Handler<SendReplicaSyncMessage> for ConnectionActor {
             ));
         }
 
-        let payload = format!("REPLICA_SYNC|{}\n", stations_str.join(";"));
+        let mut banned_users_str = Vec::new();
+        for (user_id, reason) in &msg.banned_users {
+            banned_users_str.push(format!("{},{}", user_id, reason));
+        }
+
+        let payload = format!("REPLICA_SYNC|{}|{}\n", stations_str.join(";"), banned_users_str.join(";"));
         let _ = self.socket.write_all(payload.as_bytes());
     }
 }
@@ -607,8 +632,9 @@ impl Handler<ReplicaSyncMessage> for CentralServerActor {
 
     fn handle(&mut self, msg: ReplicaSyncMessage, _ctx: &mut Context<Self>) {
         if !self.is_leader {
-            println!("[SERVER RÉPLICA] Sincronizando tabla de estaciones desde el Líder. Total estaciones: {}", msg.station_table.len());
+            println!("[SERVER RÉPLICA] Sincronizando tabla de estaciones desde el Líder. Total estaciones: {}, Usuarios baneados: {}", msg.station_table.len(), msg.banned_users.len());
             self.station_table = msg.station_table;
+            self.users_banned = msg.banned_users;
         }
     }
 }
