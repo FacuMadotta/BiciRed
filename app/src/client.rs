@@ -213,13 +213,11 @@ impl AppClient {
                 });
 
                 let file_path = format!("rental_state_{}.json", self.user_id);
-                if let Some(r) = &self.current_rental {
-                    let json_text = format!(
-                        "{{\"bike_id\":{},\"started_at_secs\":{},\"pre_auth_cents\":{},\"station_id\":{}}}",
-                        r.bike_id, r.started_at_secs, r.pre_auth_cents, r.station_id
-                    );
-                    if let Err(e) = std::fs::write(&file_path, json_text) {
-                        eprintln!("[ERROR] No se guardó el estado: {}", e);
+                if let Ok(json_content) = serde_json::to_string(&self.current_rental) {
+                    if let Err(e) = std::fs::write(&file_path, json_content) {
+                        eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}", e);
+                    } else {
+                        println!("[OFFLINE/ONLINE] Alquiler respaldado en disco de forma segura.");
                     }
                 }
 
