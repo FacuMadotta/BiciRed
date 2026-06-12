@@ -149,26 +149,28 @@ pub struct TransactionState {
 pub struct StationActor {
     station: Station,
     central_server: Option<TcpStream>,
-    payment_service: Sender<String>,
+    payment_service: Option<Sender<String>>,
     pending_transactions: HashMap<String, TransactionState>,
     server_addrs: Vec<String>,
     my_ip: String,
+    payment_ip: String,
 }
 
 impl StationActor {
     pub fn new(
         station: Station,
-        payment_service: Sender<String>,
         server_addrs: Vec<String>,
         my_ip: String,
+        payment_ip: String,
     ) -> Self {
         Self {
             station,
             central_server: None,
-            payment_service,
+            payment_service: None,
             pending_transactions: HashMap::new(),
             server_addrs,
             my_ip,
+            payment_ip,
         }
     }
 
@@ -184,10 +186,15 @@ impl StationActor {
     }
 
     fn send_msg_to_payment(&mut self, msg: String) -> Result<(), ()> {
-        if let Err(_e) = self.payment_service.send(msg) {
-            return Err(()); // Si falla el envío, asumimos que el Payment Service está offline
+        if let Some(tx) = &self.payment_service {
+            if tx.send(msg).is_err() {
+                self.payment_service = None; 
+                return Err(());
+            }
+            Ok(())
+        } else {
+            Err(())
         }
-        Ok(())
     }
 
     fn check_transaction_state(&mut self, transaction_id: &str) {
@@ -518,6 +525,52 @@ impl StationActor {
             }
         }
     }
+
+    fn try_reconnect_payment(&mut self, ctx: &mut Context<Self>) {
+        if self.payment_service.is_some() {
+            return; 
+        }
+
+        if let Ok(stream) = TcpStream::connect(&self.payment_ip) {
+            println!("[PAYMENT] ¡Conexión establecida con el servicio de pagos en {}!", self.payment_ip);
+            
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let stream_writer = stream.try_clone().expect("Error clonando escritura");
+            let mut stream_reader = stream.try_clone().expect("Error clonando lectura");
+            let station_addr = ctx.address();
+
+            std::thread::spawn(move || {
+                let mut writer = stream_writer;
+                for msg in rx {
+                    if writer.write_all(msg.as_bytes()).is_err() { break; }
+                    let _ = writer.flush();
+                }
+            });
+
+            std::thread::spawn(move || {
+                let mut buffer = [0; 1024];
+                loop {
+                    match stream_reader.read(&mut buffer) {
+                        Ok(0) | Err(_) => {
+                            println!("[PAYMENT] Conexión cerrada o caída.");
+                            break;
+                        }
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buffer[..n]);
+                            let message_type = MessageType::deserialize(text.trim());
+                            match message_type {
+                                MessageType::VoteCommit => station_addr.do_send(VoteCommit::deserialize(text.trim())),
+                                MessageType::VoteAbort => station_addr.do_send(VoteAbort::deserialize(text.trim())),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            });
+
+            self.payment_service = Some(tx);
+        }
+    }
 }
 
 impl Actor for StationActor {
@@ -527,8 +580,10 @@ impl Actor for StationActor {
         println!("StationActor iniciado. Registrando worker de BatchUpdate periódico...");
 
         self.sync_with_central();
+        self.try_reconnect_payment(ctx);
 
-        ctx.run_interval(std::time::Duration::from_secs(10), |act, _ctx| {
+        ctx.run_interval(std::time::Duration::from_secs(10), |act, ctx| {
+            act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();
         });
