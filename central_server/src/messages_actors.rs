@@ -10,6 +10,13 @@ pub struct StationUpdateMessage {
     pub response_addr: Addr<ConnectionActor>,
 }
 
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct ValidateUserMessage {
+    pub user_id: UserId,
+    pub response_addr: Addr<ConnectionActor>,
+}
+
 // Connection --> Election
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]

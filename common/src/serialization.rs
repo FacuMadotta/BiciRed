@@ -246,3 +246,25 @@ impl Serializable for BanNotification {
         )
     }
 }
+
+impl Serializable for ValidateUser {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}",
+            MessageType::ValidateUser.as_str(),
+            self.user_id
+        )
+    }
+}
+
+impl Serializable for UserValidationResult {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}|{}",
+            MessageType::UserValidationResult.as_str(),
+            self.user_id,
+            if self.is_valid { "VALID" } else { "INVALID" },
+            self.reason.as_ref().map_or_else(|| "".into(), |r| r.clone())
+        )
+    }
+}

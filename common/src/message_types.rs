@@ -27,6 +27,8 @@ pub enum MessageType {
     ReturnRent,
     UserBanned,
     BanNotification,
+    ValidateUser,
+    UserValidationResult,
 }
 
 impl MessageType {
@@ -59,6 +61,8 @@ impl MessageType {
             Self::ReturnRent => "RETURN_RENT",
             Self::UserBanned => "USER_BANNED",
             Self::BanNotification => "BAN_NOTIFICATION",
+            Self::ValidateUser => "VALIDATE_USER",
+            Self::UserValidationResult => "USER_VALIDATION_RESULT",
         }
     }
 
@@ -91,6 +95,8 @@ impl MessageType {
             "RETURN_RENT" => Some(Self::ReturnRent),
             "USER_BANNED" => Some(Self::UserBanned),
             "BAN_NOTIFICATION" => Some(Self::BanNotification),
+            "VALIDATE_USER" => Some(Self::ValidateUser),
+            "USER_VALIDATION_RESULT" => Some(Self::UserValidationResult),
             _ => None,
         }
     }

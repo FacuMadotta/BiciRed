@@ -146,6 +146,11 @@ pub struct TransactionState {
     pub started_at: SystemTime,
 }
 
+pub struct PendingValidation {
+    pub msg: RequestMessage<RentRequest, ConnectionActor>,
+    pub started_at: SystemTime,
+}
+
 pub struct StationActor {
     station: Station,
     central_server: Option<TcpStream>,
@@ -154,6 +159,7 @@ pub struct StationActor {
     server_addrs: Vec<String>,
     my_ip: String,
     payment_ip: String,
+    pending_validations: HashMap<UserId, PendingValidation>,
 }
 
 impl StationActor {
@@ -171,6 +177,7 @@ impl StationActor {
             server_addrs,
             my_ip,
             payment_ip,
+            pending_validations: HashMap::new(),
         }
     }
 
@@ -571,6 +578,66 @@ impl StationActor {
             self.payment_service = Some(tx);
         }
     }
+
+    fn process_rent_request(&mut self, msg: RequestMessage<RentRequest, ConnectionActor>, time: SystemTime) {
+        let bike_id = self
+            .station
+            .reserve_bike(msg.request.slot_index)
+            .expect("Error al reservar bicicleta");
+        self.station.save_inventory();
+        let rental_id = self.generate_rental_id(bike_id, msg.request.user_id);
+        let prepare_msg = PreparePayment {
+            card_token: msg.request.card_token.clone(),
+            amount_cents: PRE_AUTH_AMOUNT_CENTS,
+            transaction_id: rental_id.clone(),
+        };
+        let msg_serialized = prepare_msg.serialize();
+
+        match self.send_msg_to_payment(msg_serialized) {
+            Ok(_) => {
+                self.pending_transactions.insert(
+                    prepare_msg.transaction_id.clone(),
+                    TransactionState {
+                        slot_index: msg.request.slot_index,
+                        bike_id: bike_id,
+                        client_addr: msg.response.clone(),
+                        payment_voted_commit: false,
+                        app_voted_commit: false,
+                        started_at: time,
+                    },
+                );
+
+                msg.response.do_send(Prepare {
+                    transaction_id: rental_id,
+                });
+            }
+            Err(_) => {
+                // --- FLUJO OFFLINE
+                println!("[ALERTA OFFLINE] Falló comunicación con Payment. Degradando 2PC...");
+
+                self.station.confirm_reservation(msg.request.slot_index);
+                self.station.save_inventory();
+                self.sync_with_central();
+
+                self.save_pending_rent(
+                    &rental_id,
+                    msg.request.user_id,
+                    bike_id,
+                    &msg.request.card_token,
+                );
+
+                msg.response.do_send(RentConfirmed {
+                    bike_id: bike_id,
+                    pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
+                    timestamp_secs: time
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Error al obtener tiempo")
+                        .as_secs(),
+                    rental_id,
+                });
+            }
+        }
+    }
 }
 
 impl Actor for StationActor {
@@ -602,68 +669,55 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
             "StationActor recibiendo RentRequest para slot {}",
             msg.request.slot_index
         );
-        if self.station.is_bike_available(msg.request.slot_index) {
-            let bike_id = self
-                .station
-                .reserve_bike(msg.request.slot_index)
-                .expect("Error al reservar bicicleta");
-            self.station.save_inventory();
-            let rental_id = self.generate_rental_id(bike_id, msg.request.user_id);
-            let prepare_msg = PreparePayment {
-                card_token: msg.request.card_token.clone(),
-                amount_cents: PRE_AUTH_AMOUNT_CENTS,
-                transaction_id: rental_id.clone(),
-            };
-            let msg_serialized = prepare_msg.serialize();
 
-            match self.send_msg_to_payment(msg_serialized) {
-                Ok(_) => {
-                    self.pending_transactions.insert(
-                        prepare_msg.transaction_id.clone(),
-                        TransactionState {
-                            slot_index: msg.request.slot_index,
-                            bike_id: bike_id,
-                            client_addr: msg.response.clone(),
-                            payment_voted_commit: false,
-                            app_voted_commit: false,
-                            started_at: SystemTime::now(),
-                        },
-                    );
-
-                    msg.response.do_send(Prepare {
-                        transaction_id: rental_id,
-                    });
-                }
-                Err(_) => {
-                    // --- FLUJO OFFLINE
-                    println!("[ALERTA OFFLINE] Falló comunicación con Payment. Degradando 2PC...");
-
-                    self.station.confirm_reservation(msg.request.slot_index);
-                    self.station.save_inventory();
-                    self.sync_with_central();
-
-                    self.save_pending_rent(
-                        &rental_id,
-                        msg.request.user_id,
-                        bike_id,
-                        &msg.request.card_token,
-                    );
-
-                    msg.response.do_send(RentConfirmed {
-                        bike_id: bike_id,
-                        pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
-                        timestamp_secs: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Error al obtener tiempo")
-                            .as_secs(),
-                        rental_id,
-                    });
-                }
-            }
-        } else {
+        if !self.station.is_bike_available(msg.request.slot_index) {
             msg.response.do_send(RentRejected {
                 reason: "Bici no disponible".to_string(),
             });
+            return;
+        }
+
+        let user_id = msg.request.user_id;
+        let validation_msg = ValidateUser {
+            user_id,
+        };
+        let validation_msg_serialized = validation_msg.serialize();
+
+        if let Some(ref mut stream) = self.central_server {
+            if stream.write_all(validation_msg_serialized.as_bytes()).is_err() {
+                println!("[RED] Conexión perdida con el Líder durante validación. Reintentando...");
+                self.reconnect_to_leader(validation_msg_serialized);
+            } 
+            self.pending_validations.insert(user_id, PendingValidation {
+                msg: msg,
+                started_at: SystemTime::now(),
+            });
+            return;
+        } 
+        
+        println!("[VALIDACIÓN OFFLINE] No se pudo contactar al Líder para validar usuario. Degradando a validación offline...");
+        self.process_rent_request(msg, SystemTime::now());
+    }
+}
+
+    
+impl Handler<UserValidationResult> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: UserValidationResult, _ctx: &mut Self::Context) {
+        let validation =  self.pending_validations.remove(&msg.user_id);
+            
+        if !msg.is_valid {
+            if let Some(validation) = validation {
+                validation.msg.response.do_send(RentRejected {
+                    reason: msg.reason.clone().unwrap_or("Usuario no válido".to_string()),
+                });
+            }
+            return;
+        }
+        
+        if let Some(validation) = validation {
+            self.process_rent_request(validation.msg, validation.started_at);
         }
     }
 }

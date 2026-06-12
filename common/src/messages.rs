@@ -260,3 +260,17 @@ pub struct UserBanned {
 pub struct BanNotification {
     pub reason: String,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ValidateUser {
+    pub user_id: UserId,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct UserValidationResult {
+    pub user_id: UserId,
+    pub is_valid: bool,
+    pub reason: Option<String>,
+}

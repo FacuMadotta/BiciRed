@@ -175,9 +175,12 @@ impl Handler<IncomingData> for ConnectionActor {
                             response_addr: ctx.address(),
                         });
                     }
-                    "USER_BANNED" => {
-                        let ban_info = UserBanned::deserialize(message_text);
-                        self.server_addr.do_send(ban_info);
+                    "VALIDATE_USER" => {
+                        let validate_msg = ValidateUser::deserialize(message_text);
+                        self.server_addr.do_send(ValidateUserMessage {
+                            user_id: validate_msg.user_id,
+                            response_addr: ctx.address(),
+                        });
                     }
                     "IS_ALIVE" => {
                         let is_alive = IsAlive::deserialize(message_text);
@@ -376,6 +379,16 @@ impl Handler<BanNotification> for ConnectionActor {
     }
 }
 
+impl Handler<UserValidationResult> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: UserValidationResult, _ctx: &mut Self::Context) {
+        let validation_msg = msg.serialize();
+        let _ = self.socket.write_all(validation_msg.as_bytes());
+        let _ = self.socket.write_all(b"\n");
+    }
+}
+
 pub struct CentralServerActor {
     pub server_id: ServerId,
     pub is_leader: bool,
@@ -455,6 +468,33 @@ impl Handler<UserBanned> for CentralServerActor {
 
         self.users_banned.insert(msg.user_id, msg.reason.clone());
         self.broadcast_replica_sync();
+    }
+}
+
+impl Handler<ValidateUserMessage> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ValidateUserMessage, _ctx: &mut Context<Self>) {
+        println!(
+            "[SERVER] Validando usuario {}",
+            msg.user_id
+        );
+
+        let validation_result = if let Some(reason) = self.users_banned.get(&msg.user_id) {
+            UserValidationResult {
+                user_id: msg.user_id,
+                is_valid: false,
+                reason: Some(reason.clone()),
+            }
+        } else {
+            UserValidationResult {
+                user_id: msg.user_id,
+                is_valid: true,
+                reason: None,
+            }
+        };
+
+        msg.response_addr.do_send(validation_result);
     }
 }
 
