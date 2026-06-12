@@ -5,6 +5,6 @@ edition = "2021"
 
 [dependencies]
 common = { path = "../common" }
-serde = { version = "1.0" }
 serde_json = "1.0"
+serde = { version = "1.0.228", features = ["derive"] }
 actix = "0.13"

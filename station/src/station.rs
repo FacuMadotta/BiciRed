@@ -8,9 +8,11 @@ use std::net::TcpStream;
 use std::io::Read;
 use std::sync::mpsc::Sender;
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
 
 const PENDING_RENTS_PREFIX: &str = "pending_rents_";
 const PENDING_CHARGES_PREFIX: &str = "pending_charges_";
+const OFFLINE_PREFIX: &str = "inventario_estacion_";
 const TIMEOUT_SECS: u64 = 30; // Tiempo máximo para esperar un commit antes de abortar la transacción
 const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Monto filo de Pre Autorización 
 const AMOUNT_PER_MINUTE_CENTS: u32 = 50; // Costo por minuto de alquiler
@@ -22,36 +24,54 @@ pub struct Station {
     pub slots: Vec<Slot>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Slot {
     pub index: usize,
     pub state: SlotState,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub enum SlotState {
     Empty,
     Occupied { bike_id: BikeId },
-    Reserved,
+    Reserved { bike_id: BikeId },
 }
 
 impl Station {
     pub fn new(id: StationId, location: Location, num_slots: usize, num_bikes: usize) -> Self {
-        let slots = (0..num_slots)
-            .map(|i| Slot {
-                index: i,
-                state: if i < num_bikes {
-                    SlotState::Occupied {
-                        bike_id: i as BikeId,
-                    }
-                } else {
-                    SlotState::Empty
-                },
+        let filename = format!("{}{}.json", OFFLINE_PREFIX, id);
+        let mut slots = if let Ok(content) = std::fs::read_to_string(&filename) {
+            println!("[RECONECTANDO] Inventario previo detectado para estación {}. Cargando...", id);
+            serde_json::from_str::<Vec<Slot>>(&content).unwrap_or_else(|_| {
+                Self::default_slots(num_slots, num_bikes)
             })
-            .collect();
+        } else {
+            Self::default_slots(num_slots, num_bikes)
+        };
+        for slot in &mut slots {
+            if let SlotState::Reserved { bike_id } = slot.state {
+                println!("[RECONECTANDO] Revertida reserva del slot {} (Bici {}) debido a reinicio.", slot.index, bike_id);
+                slot.state = SlotState::Occupied { bike_id };
+            }
+        }
         Self {
             id,
             location,
             slots,
         }
+    }
+
+    fn default_slots(num_slots: usize, num_bikes: usize) -> Vec<Slot> {
+        (0..num_slots)
+            .map(|i| Slot {
+                index: i,
+                state: if i < num_bikes {
+                    SlotState::Occupied { bike_id: i as BikeId }
+                } else {
+                    SlotState::Empty
+                },
+            })
+            .collect()
     }
 
     fn is_bike_available(&self, slot_index: usize) -> bool {
@@ -64,7 +84,7 @@ impl Station {
     fn reserve_bike(&mut self, slot_index: usize) -> Option<BikeId> {
         if let Some(slot) = self.slots.get_mut(slot_index) {
             if let SlotState::Occupied { bike_id } = slot.state {
-                slot.state = SlotState::Reserved; // Marcar el slot como reservado antes de commit
+                slot.state = SlotState::Reserved{ bike_id }; // Marcar el slot como reservado antes de commit
                 return Some(bike_id);
             }
         }
@@ -73,7 +93,7 @@ impl Station {
 
     fn confirm_reservation(&mut self, slot_index: usize) {
         if let Some(slot) = self.slots.get_mut(slot_index) {
-            if let SlotState::Reserved = slot.state {
+            if let SlotState::Reserved { .. } = slot.state {
                 slot.state = SlotState::Empty; // Marcar el slot como vacío después de commit
             }
         }
@@ -94,7 +114,7 @@ impl Station {
 
     fn cancel_reservation(&mut self, slot_index: usize, bike_id: BikeId) {
         if let Some(slot) = self.slots.get_mut(slot_index) {
-            if let SlotState::Reserved = slot.state {
+            if let SlotState::Reserved { .. } = slot.state {
                 slot.state = SlotState::Occupied { bike_id }; // Volver al estado ocupado con la misma bicicleta
             }
         }
@@ -104,6 +124,15 @@ impl Station {
         let duration_secs = end_secs.saturating_sub(start_secs);
         let minutes = duration_secs.div_ceil(60);
         minutes as u32 * AMOUNT_PER_MINUTE_CENTS as u32
+    }
+
+    pub fn save_inventory(&self) {
+        let filename = format!("{}{}.json", OFFLINE_PREFIX, self.id);
+        if let Ok(json_content) = serde_json::to_string(&self.slots) {
+            if let Err(e) = std::fs::write(&filename, json_content) {
+                eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el inventario: {}", e);
+            }
+        }
     }
 }
 
@@ -171,6 +200,7 @@ impl StationActor {
             // Si ambos votaron commit, confirmamos el alquiler
             if let Some(tx) = self.pending_transactions.remove(transaction_id) {
                 self.station.confirm_reservation(tx.slot_index);
+                self.station.save_inventory();
                 tx.client_addr.do_send(RentConfirmed {
                     bike_id: tx.bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
@@ -481,6 +511,7 @@ impl StationActor {
                 let _ = self.send_msg_to_payment(rollback_msg_serialized);
 
                 self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+                self.station.save_inventory();
                 tx.client_addr.do_send(RentRejected {
                     reason: "Transacción expirada por timeout".to_string(),
                 });
@@ -521,6 +552,7 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
                 .station
                 .reserve_bike(msg.request.slot_index)
                 .expect("Error al reservar bicicleta");
+            self.station.save_inventory();
             let rental_id = self.generate_rental_id(bike_id, msg.request.user_id);
             let prepare_msg = PreparePayment {
                 card_token: msg.request.card_token.clone(),
@@ -598,6 +630,7 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
 
         if self.station.is_slot_free(slot) {
             self.station.return_bike(slot, bike_id);
+            self.station.save_inventory();
             let amount_cents = self.station.calculate_amount(started_at_secs, now_secs);
             let capture_msg = CapturePayment {
                 transaction_id: rental_id,
@@ -664,6 +697,7 @@ impl Handler<RequestMessage<VoteAbort, ConnectionActor>> for StationActor {
         let transaction = self.pending_transactions.remove(&msg.request.transaction_id);
         if let Some(tx) = transaction {
             self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+            self.station.save_inventory();
         }
     }
 }
@@ -695,6 +729,7 @@ impl Handler<VoteAbort> for StationActor {
         let transaction = self.pending_transactions.remove(&msg.transaction_id);
         if let Some(tx) = transaction {
             self.station.cancel_reservation(tx.slot_index, tx.bike_id);
+            self.station.save_inventory();
         }
     }
 }
