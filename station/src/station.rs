@@ -443,6 +443,19 @@ impl StationActor {
     fn sync_with_central(&mut self) {
         let available_bikes = self.station.slots.iter().filter(|s| !matches!(s.state, SlotState::Empty)).count();
         let free_slots = self.station.slots.len() - available_bikes;
+
+        let occupieds: Vec<String> = self.station.slots.iter()
+        .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
+        .map(|s| s.index.to_string())
+        .collect();
+
+        let frees: Vec<String> = self.station.slots.iter()
+        .filter(|s| matches!(s.state, SlotState::Empty))
+        .map(|s| s.index.to_string())
+        .collect();
+
+        let occupied_map = occupieds.join(",");
+        let free_map = frees.join(",");
     
         let status = StationStatus {
             station_id: self.station.id,
@@ -451,6 +464,8 @@ impl StationActor {
             free_slots: free_slots as u8,
             updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
             station_addr: self.my_ip.clone(),
+            slots_occupied: occupied_map,
+            slots_frees: free_map,
         };
     
         let update_msg = StationUpdate { station: status };
@@ -771,6 +786,7 @@ impl Actor for StationActor {
         self.try_reconnect_payment(ctx);
 
         ctx.run_interval(std::time::Duration::from_secs(10), |act, ctx| {
+            act.sync_with_central();
             act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();

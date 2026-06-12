@@ -99,9 +99,12 @@ impl AppClient {
                             );
                             for st in &response.stations {
                                 println!(
-                                    " - Estación {} | Bicis: {} | Libres: {}",
+                                    " - Estación {} | Bicis: {} | Libres: {}", 
                                     st.station_id, st.available_bikes, st.free_slots
                                 );
+                                println!("   [Slots con Bici]: [{}]", st.slots_occupied);
+                                println!("   [Slots Libres]  : [{}]", st.slots_frees);
+                                println!("------------------------------------------------");
                             }
                             self.cached_stations = response.stations;
                             connected = true;

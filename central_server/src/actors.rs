@@ -238,8 +238,8 @@ impl Handler<IncomingData> for ConnectionActor {
                             let mut new_table = HashMap::new();
                             if !parts[1].is_empty() {
                                 for st_str in parts[1].split(';') {
-                                    let props: Vec<&str> = st_str.split(',').collect();
-                                    if props.len() == 7 {
+                                    let props: Vec<&str> = st_str.split('#').collect();
+                                    if props.len() == 9 {
                                         if let (
                                             Ok(id),
                                             Ok(x),
@@ -264,6 +264,8 @@ impl Handler<IncomingData> for ConnectionActor {
                                                     free_slots: slots,
                                                     updated_at_secs: ts,
                                                     station_addr: props[6].to_string(),
+                                                    slots_occupied: props[7].to_string(),
+                                                    slots_frees: props[8].to_string(),
                                                 },
                                             );
                                         }
@@ -543,6 +545,8 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
                     free_slots: station.free_slots,
                     updated_at_secs: station.updated_at_secs,
                     station_addr: station.station_addr.clone(),
+                    slots_occupied: station.slots_occupied.clone(),
+                    slots_frees: station.slots_frees.clone(),
                 });
             }
         }
@@ -650,14 +654,16 @@ impl Handler<SendReplicaSyncMessage> for ConnectionActor {
         let mut stations_str = Vec::new();
         for st in msg.station_table.values() {
             stations_str.push(format!(
-                "{},{},{},{},{},{},{}",
+                "{}#{}#{}#{}#{}#{}#{}#{}#{}",
                 st.station_id,
                 st.location.x,
                 st.location.y,
                 st.available_bikes,
                 st.free_slots,
                 st.updated_at_secs,
-                st.station_addr
+                st.station_addr,
+                st.slots_occupied,
+                st.slots_frees
             ));
         }
 
