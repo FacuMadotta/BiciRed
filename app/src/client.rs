@@ -197,12 +197,51 @@ impl AppClient {
         let prepare_text = String::from_utf8_lossy(&buf[..n]).trim().to_string();
         let msg_type = MessageType::deserialize(&prepare_text);
 
-        if msg_type != MessageType::Prepare {
-            println!(
-                "\n[ERROR] Se esperaba fase PREPARE, se recibió: {}",
-                prepare_text
-            );
-            return;
+        match msg_type {
+            MessageType::RentConfirmed => {
+                let conf = RentConfirmed::deserialize(&prepare_text);
+                println!(
+                    "\n[ÉXITO PAYMENT OFFLINE] Bici {} liberada. Pre-auth: ${}",
+                    conf.bike_id, conf.pre_auth_cents
+                );
+
+                self.current_rental = Some(crate::models::ActiveRental {
+                    bike_id: conf.bike_id,
+                    started_at_secs: conf.timestamp_secs,
+                    pre_auth_cents: conf.pre_auth_cents,
+                    station_id: 0, 
+                });
+
+                let file_path = format!("rental_state_{}.json", self.user_id);
+                if let Some(r) = &self.current_rental {
+                    let json_text = format!(
+                        "{{\"bike_id\":{},\"started_at_secs\":{},\"pre_auth_cents\":{},\"station_id\":{}}}",
+                        r.bike_id, r.started_at_secs, r.pre_auth_cents, r.station_id
+                    );
+                    if let Err(e) = std::fs::write(&file_path, json_text) {
+                        eprintln!("[ERROR] No se guardó el estado: {}", e);
+                    }
+                }
+
+                return;
+            }
+
+            MessageType::RentRejected => {
+                let rej = RentRejected::deserialize(&prepare_text);
+                println!("\n[RECHAZO] No se pudo alquilar: {}", rej.reason);
+                return;
+            }
+
+            MessageType::Prepare => {
+            }
+
+            _ => {
+                println!(
+                    "\n[ERROR] Se esperaba PREPARE o CONFIRMACIÓN, se recibió: {}",
+                    prepare_text
+                );
+                return;
+            }
         }
 
         let parts: Vec<&str> = prepare_text.split('|').collect();
