@@ -291,10 +291,15 @@ impl Deserializable for UserValidationResult {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();
         assert!(parts.len() == 4);
+        let is_valid = match parts[2] {
+            "VALID" => true,
+            "INVALID" => false,
+            _ => parts[2].parse().expect("Invalid is_valid value"),
+        };
         Self {
             user_id: parts[1].parse().expect("Invalid user_id"),
-            is_valid: parts[2].parse().expect("Invalid is_valid value"),
-            reason: if parts[2].parse::<bool>().expect("Invalid is_valid value") {
+            is_valid,
+            reason: if is_valid {
                 None
             } else {
                 Some(parts[3].to_string())

@@ -153,7 +153,7 @@ pub struct PendingValidation {
 
 pub struct StationActor {
     station: Station,
-    central_server: Option<TcpStream>,
+    central_server: Option<Sender<String>>,
     payment_service: Option<Sender<String>>,
     pending_transactions: HashMap<String, TransactionState>,
     server_addrs: Vec<String>,
@@ -347,8 +347,8 @@ impl StationActor {
                             as UserId,
                     };
                     let central_msg_serialized = central_msg.serialize();
-                    let central_ok = if let Some(ref mut stream) = self.central_server {
-                        stream.write_all(central_msg_serialized.as_bytes()).is_ok()
+                    let central_ok = if let Some(ref sender) = self.central_server {
+                        sender.send(central_msg_serialized).is_ok()
                     } else {
                         false 
                     };
@@ -412,8 +412,8 @@ impl StationActor {
 
                     let central_msg_serialized = central_msg.serialize();
 
-                    let central_ok = if let Some(ref mut stream) = self.central_server {
-                        stream.write_all(central_msg_serialized.as_bytes()).is_ok()
+                    let central_ok = if let Some(ref sender) = self.central_server {
+                        sender.send(central_msg_serialized).is_ok()
                     } else {
                         false 
                     };
@@ -456,51 +456,165 @@ impl StationActor {
         let update_msg = StationUpdate { station: status };
         let payload = format!("{}\n", update_msg.serialize());
     
-        if let Some(ref mut stream) = self.central_server {
-            if stream.write_all(payload.as_bytes()).is_err() {
-                println!("[RED] Conexión perdida con el Líder. Reconectando...");
-                self.reconnect_to_leader(payload);
+        if let Some(ref sender) = self.central_server {
+            if sender.send(payload).is_err() {
+                println!("[RED] Conexión perdida con el Líder.");
+                self.central_server = None;
             } else {
                 println!("[CENTRAL] Estado sincronizado exitosamente.");
             }
         } else {
-            println!("[NUEVA CONEXIÓN] Buscando Líder en la red...");
-            self.reconnect_to_leader(payload);
+            println!("[NUEVA CONEXIÓN] Buscando Líder en la red (esperando conexión de fondo)...");
         }
     }
-    
-    fn reconnect_to_leader(&mut self, payload: String) {
-        let mut server_idx = 0;
-        loop {
-            let target_ip = &self.server_addrs[server_idx];
-            println!("[RECONEXIÓN] Probando nodo {}...", target_ip);
-    
-            if let Ok(mut stream) = TcpStream::connect(target_ip) {
-                if stream.write_all(payload.as_bytes()).is_ok() {
-                    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
-                    let mut buf = [0u8; 1024];
-                    
-                    match stream.read(&mut buf) {
-                        Ok(n) if n > 0 => {
-                            let response = String::from_utf8_lossy(&buf[..n]);
-                            if response.starts_with("NOT_LEADER") {
-                                server_idx = (server_idx + 1) % self.server_addrs.len();
-                                continue;
+
+    fn start_central_connection(&mut self, ctx: &mut Context<Self>) {
+        let station_addr = ctx.address();
+        let server_addrs = self.server_addrs.clone();
+        let my_ip = self.my_ip.clone();
+        let station_id = self.station.id;
+        let location = self.station.location.clone();
+        let num_slots = self.station.slots.len();
+
+        std::thread::spawn(move || {
+            let mut server_idx = 0;
+            loop {
+                let target_ip = &server_addrs[server_idx];
+                println!("[RECONEXIÓN CENTRAL] Probando nodo {}...", target_ip);
+
+                match TcpStream::connect(target_ip) {
+                    Ok(mut stream) => {
+                        let status = StationStatus {
+                            station_id,
+                            location: Location { x: location.x, y: location.y },
+                            available_bikes: 0,
+                            free_slots: num_slots as u8,
+                            updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                            station_addr: my_ip.clone(),
+                        };
+                        let update_msg = StationUpdate { station: status };
+                        let payload = format!("{}\n", update_msg.serialize());
+
+                        if stream.write_all(payload.as_bytes()).is_ok() {
+                            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                            let mut buf = [0u8; 1024];
+                            match stream.read(&mut buf) {
+                                Ok(n) if n > 0 => {
+                                    let response = String::from_utf8_lossy(&buf[..n]);
+                                    if response.starts_with("NOT_LEADER") {
+                                        println!("[RECONEXIÓN CENTRAL] Nodo {} no es el Líder.", target_ip);
+                                        server_idx = (server_idx + 1) % server_addrs.len();
+                                        std::thread::sleep(std::time::Duration::from_secs(1));
+                                        continue;
+                                    }
+                                }
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                                    println!("[RECONEXIÓN CENTRAL] ¡Líder encontrado en {}!", target_ip);
+                                    let _ = stream.set_read_timeout(None);
+
+                                    let (tx, rx) = std::sync::mpsc::channel::<String>();
+                                    station_addr.do_send(CentralServerConnected { sender: tx });
+
+                                    let mut stream_writer = match stream.try_clone() {
+                                        Ok(s) => s,
+                                        Err(_) => {
+                                            station_addr.do_send(CentralServerDisconnected);
+                                            server_idx = (server_idx + 1) % server_addrs.len();
+                                            continue;
+                                        }
+                                    };
+                                    let mut stream_reader = match stream.try_clone() {
+                                        Ok(s) => s,
+                                        Err(_) => {
+                                            station_addr.do_send(CentralServerDisconnected);
+                                            server_idx = (server_idx + 1) % server_addrs.len();
+                                            continue;
+                                        }
+                                    };
+                                    let stream_to_shutdown = match stream.try_clone() {
+                                        Ok(s) => s,
+                                        Err(_) => {
+                                            station_addr.do_send(CentralServerDisconnected);
+                                            server_idx = (server_idx + 1) % server_addrs.len();
+                                            continue;
+                                        }
+                                    };
+
+                                    let station_addr_clone = station_addr.clone();
+                                    let sender_handle = std::thread::spawn(move || {
+                                        for msg in rx {
+                                            let formatted = if msg.ends_with('\n') {
+                                                msg
+                                            } else {
+                                                format!("{}\n", msg)
+                                            };
+                                            if stream_writer.write_all(formatted.as_bytes()).is_err() {
+                                                break;
+                                            }
+                                            let _ = stream_writer.flush();
+                                        }
+                                        println!("[CENTRAL SENDER] Hilo de envío finalizado por error o desconexión.");
+                                        let _ = stream_to_shutdown.shutdown(std::net::Shutdown::Both);
+                                    });
+
+                                    let receiver_station_addr = station_addr.clone();
+                                    let receiver_handle = std::thread::spawn(move || {
+                                        let mut buffer = [0; 4096];
+                                        loop {
+                                            match stream_reader.read(&mut buffer) {
+                                                Ok(0) | Err(_) => {
+                                                    println!("[CENTRAL RECEIVER] Conexión con central cerrada o caída.");
+                                                    receiver_station_addr.do_send(CentralServerDisconnected);
+                                                    break;
+                                                }
+                                                Ok(n) => {
+                                                    let data = String::from_utf8_lossy(&buffer[..n]);
+                                                    for line in data.lines() {
+                                                        let message_text = line.trim();
+                                                        if message_text.is_empty() {
+                                                            continue;
+                                                        }
+                                                        let prefix = message_text.split('|').next().unwrap_or("");
+                                                        if let Some(message_type) = MessageType::from_str(prefix) {
+                                                            match message_type {
+                                                                MessageType::UserValidationResult => {
+                                                                    receiver_station_addr.do_send(UserValidationResult::deserialize(message_text));
+                                                                }
+                                                                MessageType::ReservationRejected => {
+                                                                    receiver_station_addr.do_send(ReservationRejected::deserialize(message_text));
+                                                                }
+                                                                _ => {
+                                                                    println!("[CENTRAL RECEIVER] Mensaje no manejado del central server: {}", message_text);
+                                                                }
+                                                            }
+                                                        } else {
+                                                            println!("[CENTRAL RECEIVER] Tipo de mensaje desconocido: {}", prefix);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+
+                                    let _ = receiver_handle.join();
+                                    let _ = sender_handle.join(); // wait for sender thread too
+                                    station_addr_clone.do_send(CentralServerDisconnected);
+                                }
+                                _ => {
+                                    server_idx = (server_idx + 1) % server_addrs.len();
+                                }
                             }
-                        },
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                            println!("[RECONEXIÓN] ¡Nuevo Líder encontrado en {}!", target_ip);
-                            stream.set_read_timeout(None).unwrap();
-                            self.central_server = Some(stream);
-                            return;
-                        },
-                        _ => {}
+                        } else {
+                            server_idx = (server_idx + 1) % server_addrs.len();
+                        }
+                    }
+                    Err(_) => {
+                        server_idx = (server_idx + 1) % server_addrs.len();
                     }
                 }
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
-            server_idx = (server_idx + 1) % self.server_addrs.len();
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
+        });
     }
 
     fn abort_expired_transactions(&mut self) {
@@ -563,12 +677,19 @@ impl StationActor {
                             break;
                         }
                         Ok(n) => {
-                            let text = String::from_utf8_lossy(&buffer[..n]);
-                            let message_type = MessageType::deserialize(text.trim());
-                            match message_type {
-                                MessageType::VoteCommit => station_addr.do_send(VoteCommit::deserialize(text.trim())),
-                                MessageType::VoteAbort => station_addr.do_send(VoteAbort::deserialize(text.trim())),
-                                _ => {}
+                            let data = String::from_utf8_lossy(&buffer[..n]);
+                            for line in data.lines() {
+                                let text = line.trim();
+                                if text.is_empty() {
+                                    continue;
+                                }
+                                let message_type = MessageType::deserialize(text);
+                                match message_type {
+                                    MessageType::VoteCommit => station_addr.do_send(VoteCommit::deserialize(text)),
+                                    MessageType::VoteAbort => station_addr.do_send(VoteAbort::deserialize(text)),
+                                    MessageType::ReservationRejected => station_addr.do_send(ReservationRejected::deserialize(text)),
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -646,13 +767,14 @@ impl Actor for StationActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         println!("StationActor iniciado. Registrando worker de BatchUpdate periódico...");
 
-        self.sync_with_central();
+        self.start_central_connection(ctx);
         self.try_reconnect_payment(ctx);
 
         ctx.run_interval(std::time::Duration::from_secs(10), |act, ctx| {
             act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();
+            act.sync_with_central();
         });
     }
 }
@@ -683,16 +805,17 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
         };
         let validation_msg_serialized = validation_msg.serialize();
 
-        if let Some(ref mut stream) = self.central_server {
-            if stream.write_all(validation_msg_serialized.as_bytes()).is_err() {
-                println!("[RED] Conexión perdida con el Líder durante validación. Reintentando...");
-                self.reconnect_to_leader(validation_msg_serialized);
-            } 
-            self.pending_validations.insert(user_id, PendingValidation {
-                msg: msg,
-                started_at: SystemTime::now(),
-            });
-            return;
+        if let Some(ref sender) = self.central_server {
+            if sender.send(validation_msg_serialized).is_ok() {
+                self.pending_validations.insert(user_id, PendingValidation {
+                    msg,
+                    started_at: SystemTime::now(),
+                });
+                return;
+            } else {
+                println!("[RED] Conexión perdida con el Líder durante validación.");
+                self.central_server = None;
+            }
         } 
         
         println!("[VALIDACIÓN OFFLINE] No se pudo contactar al Líder para validar usuario. Degradando a validación offline...");
@@ -858,9 +981,41 @@ impl Handler<ReservationRejected> for StationActor {
                 reason: format!("Bloqueado por no realizar pago: {}", msg.reason),
             };
             let ban_msg_serialized = ban_msg.serialize();
-            if let Some(ref mut stream) = self.central_server {
-                let _ = stream.write_all(ban_msg_serialized.as_bytes());
+            if let Some(ref sender) = self.central_server {
+                let _ = sender.send(ban_msg_serialized);
             }
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CentralServerConnected {
+    pub sender: std::sync::mpsc::Sender<String>,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CentralServerDisconnected;
+
+impl Handler<CentralServerConnected> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: CentralServerConnected, _ctx: &mut Self::Context) {
+        println!("[STATION] Conectado al Central Server. Habilitando comunicación.");
+        self.central_server = Some(msg.sender);
+        self.sync_with_central();
+        self.process_batch_updates();
+    }
+}
+
+impl Handler<CentralServerDisconnected> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: CentralServerDisconnected, _ctx: &mut Self::Context) {
+        if self.central_server.is_some() {
+            println!("[STATION] Desconectado del Central Server. Deshabilitando comunicación.");
+            self.central_server = None;
         }
     }
 }

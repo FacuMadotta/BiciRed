@@ -182,6 +182,10 @@ impl Handler<IncomingData> for ConnectionActor {
                             response_addr: ctx.address(),
                         });
                     }
+                    "USER_BANNED" => {
+                        let ban_info = UserBanned::deserialize(message_text);
+                        self.server_addr.do_send(ban_info);
+                    }
                     "IS_ALIVE" => {
                         let is_alive = IsAlive::deserialize(message_text);
                         self.elector_addr.do_send(LeaderAliveMessage {

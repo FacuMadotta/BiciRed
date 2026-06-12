@@ -35,7 +35,8 @@ impl ConnectionActor {
         T: Serializable,
     {
         let response_text = response.serialize();
-        let _ = self.socket.write_all(response_text.as_bytes());
+        let formatted = format!("{}\n", response_text);
+        let _ = self.socket.write_all(formatted.as_bytes());
     }
 }
 
