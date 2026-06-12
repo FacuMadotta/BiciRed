@@ -255,3 +255,14 @@ impl Deserializable for CapturePayment {
         }
     }
 }
+
+impl Deserializable for UserBanned {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 3);
+        Self {
+            user_id: parts[1].parse().expect("Invalid user_id"),
+            reason: parts[2].to_string(),
+        }
+    }
+}

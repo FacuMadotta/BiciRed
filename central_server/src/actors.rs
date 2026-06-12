@@ -3,7 +3,7 @@ use crate::messages_actors::NewConnectionMessage;
 use crate::messages_actors::*;
 use actix::prelude::*;
 use common::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -174,6 +174,10 @@ impl Handler<IncomingData> for ConnectionActor {
                             station: update.station,
                             response_addr: ctx.address(),
                         });
+                    }
+                    "USER_BANNED" => {
+                        let ban_info = UserBanned::deserialize(message_text);
+                        self.server_addr.do_send(ban_info);
                     }
                     "IS_ALIVE" => {
                         let is_alive = IsAlive::deserialize(message_text);
@@ -354,6 +358,7 @@ pub struct CentralServerActor {
     pub peers: HashMap<ServerId, Addr<ConnectionActor>>,
     pub elector_addr: Option<Addr<ElectorActor>>,
     pub peer_addrs: HashMap<ServerId, String>,
+    pub users_banned: HashSet<UserId>,
 }
 
 impl CentralServerActor {
@@ -369,6 +374,7 @@ impl CentralServerActor {
             peers: HashMap::new(),
             peer_addrs,
             elector_addr: None,
+            users_banned: HashSet::new(),
         }
     }
 }
@@ -404,6 +410,19 @@ impl Handler<StationUpdateMessage> for CentralServerActor {
                 station_table: self.station_table.clone(),
             });
         }
+    }
+}
+
+impl Handler<UserBanned> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: UserBanned, _ctx: &mut Context<Self>) {
+        println!(
+            "[SERVER] Usuario {} ha sido baneado. Razón: {}",
+            msg.user_id, msg.reason
+        );
+
+        self.users_banned.insert(msg.user_id);
     }
 }
 

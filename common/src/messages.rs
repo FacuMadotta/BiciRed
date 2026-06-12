@@ -247,3 +247,10 @@ pub struct ReturnRent {
     pub rental_id: String,
     pub bike_id: BikeId,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct UserBanned {
+    pub user_id: UserId,
+    pub reason: String,
+}

@@ -25,6 +25,7 @@ pub enum MessageType {
     ReservationRejected,
     OfflineRent,
     ReturnRent,
+    UserBanned,
 }
 
 impl MessageType {
@@ -55,6 +56,7 @@ impl MessageType {
             Self::ReservationRejected => "RESERVATION_REJECTED",
             Self::OfflineRent => "OFFLINE_RENT",
             Self::ReturnRent => "RETURN_RENT",
+            Self::UserBanned => "USER_BANNED",
         }
     }
 
@@ -85,6 +87,7 @@ impl MessageType {
             "RESERVATION_REJECTED" => Some(Self::ReservationRejected),
             "OFFLINE_RENT" => Some(Self::OfflineRent),
             "RETURN_RENT" => Some(Self::ReturnRent),
+            "USER_BANNED" => Some(Self::UserBanned),
             _ => None,
         }
     }

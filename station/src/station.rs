@@ -150,6 +150,10 @@ impl StationActor {
         }
     }
 
+    fn client_id_from_rental(&self, rental_id: &str) -> Option<UserId> {
+        rental_id.split('-').nth(1)?.parse().ok()
+    }
+
     fn send_msg_to_payment(&mut self, msg: String) -> Result<(), ()> {
         if let Err(_e) = self.payment_service.send(msg) {
             return Err(()); // Si falla el envío, asumimos que el Payment Service está offline
@@ -699,10 +703,18 @@ impl Handler<ReservationRejected> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
-        let return_msg = RentRejected {
-            reason: format!("Reserva rechazada por Payment: {}", msg.reason),
-        };
+        let client_id = self.client_id_from_rental(&msg.transaction_id);
 
         // Enviar mensaje a central server para que bloquee al usuario
+        if let Some(user_id) = client_id {
+            let ban_msg = UserBanned {
+                user_id,
+                reason: format!("Bloqueado por no realizar pago: {}", msg.reason),
+            };
+            let ban_msg_serialized = ban_msg.serialize();
+            if let Some(ref mut stream) = self.central_server {
+                let _ = stream.write_all(ban_msg_serialized.as_bytes());
+            }
+        }
     }
 }

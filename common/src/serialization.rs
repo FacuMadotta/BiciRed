@@ -225,3 +225,14 @@ fn serialize_station_status(station: &StationStatus) -> String {
         station.station_addr
     )
 }
+
+impl Serializable for UserBanned {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            MessageType::userBanned.as_str(),
+            self.user_id,
+            self.reason
+        )
+    }
+}
