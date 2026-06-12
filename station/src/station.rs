@@ -584,6 +584,8 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
                     println!("[ALERTA OFFLINE] Falló comunicación con Payment. Degradando 2PC...");
 
                     self.station.confirm_reservation(msg.request.slot_index);
+                    self.station.save_inventory();
+                    self.sync_with_central();
 
                     self.save_pending_rent(
                         &rental_id,

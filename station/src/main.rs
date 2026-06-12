@@ -37,7 +37,7 @@ async fn main() -> std::io::Result<()> {
     let server_addrs: Vec<String> = server_nodes.into_iter().map(|n| n.addr).collect();
 
     let payment_socket =
-        TcpStream::connect(payment_ip).expect("Error conectando al servicio de pagos");
+        TcpStream::connect(payment_ip);
 
     let station_data = Station::new(
         my_id,
@@ -73,68 +73,73 @@ async fn main() -> std::io::Result<()> {
 }
 
 pub fn start_payment_gateway(
-    stream: TcpStream,
+    stream: std::io::Result<TcpStream>,
     station_addr: Addr<StationActor>,
 ) -> std::sync::mpsc::Sender<String> {
-    let stream_writer = stream
-        .try_clone()
-        .expect("Error clonando el stream para escritura");
-    let mut stream_reader = stream
-        .try_clone()
-        .expect("Error clonando el stream para lectura");
     let (tx, rx) = std::sync::mpsc::channel::<String>();
 
-    std::thread::spawn(move || {
-        let mut writer = stream_writer;
-        for message in rx {
-            if let Err(e) = writer.write_all(message.as_bytes()) {
-                eprintln!("Error escribiendo al servicio de pagos: {}", e);
-                break;
-            }
-            let _ = writer.flush();
-        }
-    });
-
-    std::thread::spawn(move || {
-        let mut buffer = [0; 1024];
-        loop {
-            match stream_reader.read(&mut buffer) {
-                Ok(0) => {
-                    println!("Conexión cerrada por el servicio de pagos");
-                    break;
+    match stream {
+        Ok(s) => {
+            let stream_writer = s.try_clone().expect("Error clonando el stream para escritura");
+            let mut stream_reader = s.try_clone().expect("Error clonando el stream para lectura");
+            std::thread::spawn(move || {
+                println!("[PAYMENT] Conexión establecida con el servicio de pagos.");
+                let mut writer = stream_writer;
+                for message in rx {
+                    if let Err(e) = writer.write_all(message.as_bytes()) {
+                        eprintln!("Error escribiendo al servicio de pagos: {}", e);
+                        break;
+                    }
+                    let _ = writer.flush();
                 }
-                Ok(n) => {
-                    let text = String::from_utf8_lossy(&buffer[..n]);
-                    let message_text = text.trim();
-                    let message_type = MessageType::deserialize(message_text);
-                    match message_type {
-                        MessageType::VoteCommit => {
-                            let vote_msg = VoteCommit::deserialize(message_text);
-                            station_addr.do_send(vote_msg);
+            });
+
+            std::thread::spawn(move || {
+                let mut buffer = [0; 1024];
+                loop {
+                    match stream_reader.read(&mut buffer) {
+                        Ok(0) => {
+                            println!("Conexión cerrada por el servicio de pagos");
+                            break;
                         }
-                        MessageType::VoteAbort => {
-                            let vote_msg = VoteAbort::deserialize(message_text);
-                            station_addr.do_send(vote_msg);
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buffer[..n]);
+                            let message_text = text.trim();
+                            let message_type = MessageType::deserialize(message_text);
+                            match message_type {
+                                MessageType::VoteCommit => {
+                                    let vote_msg = VoteCommit::deserialize(message_text);
+                                    station_addr.do_send(vote_msg);
+                                }
+                                MessageType::VoteAbort => {
+                                    let vote_msg = VoteAbort::deserialize(message_text);
+                                    station_addr.do_send(vote_msg);
+                                }
+                                MessageType::ReservationRejected => {
+                                    let reject_msg = ReservationRejected::deserialize(message_text);
+                                    station_addr.do_send(reject_msg);
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "Mensaje desconocido recibido del servicio de pagos: {}",
+                                        message_text
+                                    );
+                                }
+                            }
                         }
-                        MessageType::ReservationRejected => {
-                            let reject_msg = ReservationRejected::deserialize(message_text);
-                            station_addr.do_send(reject_msg);
-                        }
-                        _ => {
-                            eprintln!(
-                                "Mensaje desconocido recibido del servicio de pagos: {}",
-                                message_text
-                            );
+                        Err(e) => {
+                            eprintln!("Error leyendo del servicio de pagos: {}", e);
+                            break;
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Error leyendo del servicio de pagos: {}", e);
-                    break;
-                }
-            }
+            });
         }
-    });
+        Err(e) => {
+            println!("\n[ALERTA OFFLINE] No se pudo conectar al Payment Service: {}", e);
+            println!("[ALERTA OFFLINE] La Estación operará de forma local y guardará los cobros para más tarde.\n");
+        }
+    }
     tx
 }
 
