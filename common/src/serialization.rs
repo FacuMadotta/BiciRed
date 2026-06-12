@@ -230,8 +230,18 @@ impl Serializable for UserBanned {
     fn serialize(&self) -> String {
         format!(
             "{}|{}|{}",
-            MessageType::userBanned.as_str(),
+            MessageType::UserBanned.as_str(),
             self.user_id,
+            self.reason
+        )
+    }
+}
+
+impl Serializable for BanNotification {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}",
+            MessageType::BanNotification.as_str(),
             self.reason
         )
     }

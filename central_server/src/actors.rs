@@ -3,7 +3,7 @@ use crate::messages_actors::NewConnectionMessage;
 use crate::messages_actors::*;
 use actix::prelude::*;
 use common::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -212,12 +212,14 @@ impl Handler<IncomingData> for ConnectionActor {
                         }
                     }
                     "NEARBY_QUERY" => {
-                        if parts.len() == 4 {
-                            let x: f64 = parts[1].trim().parse().unwrap_or(0.0);
-                            let y: f64 = parts[2].trim().parse().unwrap_or(0.0);
-                            let radius: f64 = parts[3].trim().parse().unwrap_or(0.0);
+                        if parts.len() == 5 {
+                            let user_id: UserId = parts[1].parse().unwrap_or(0);
+                            let x: f64 = parts[2].trim().parse().unwrap_or(0.0);
+                            let y: f64 = parts[3].trim().parse().unwrap_or(0.0);
+                            let radius: f64 = parts[4].trim().parse().unwrap_or(0.0);
 
                             self.server_addr.do_send(NearbyStationsRequestMessage {
+                                user_id,
                                 location: Location { x, y },
                                 radius,
                                 response_addr: ctx.address(),
@@ -350,6 +352,16 @@ impl Handler<SendCoordinatorMessage> for ConnectionActor {
     }
 }
 
+impl Handler<BanNotification> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: BanNotification, _ctx: &mut Self::Context) {
+        let ban_msg = msg.serialize();
+        let _ = self.socket.write_all(ban_msg.as_bytes());
+        let _ = self.socket.write_all(b"\n");
+    }
+}
+
 pub struct CentralServerActor {
     pub server_id: ServerId,
     pub is_leader: bool,
@@ -358,7 +370,7 @@ pub struct CentralServerActor {
     pub peers: HashMap<ServerId, Addr<ConnectionActor>>,
     pub elector_addr: Option<Addr<ElectorActor>>,
     pub peer_addrs: HashMap<ServerId, String>,
-    pub users_banned: HashSet<UserId>,
+    pub users_banned: HashMap<UserId, String>,
 }
 
 impl CentralServerActor {
@@ -374,7 +386,7 @@ impl CentralServerActor {
             peers: HashMap::new(),
             peer_addrs,
             elector_addr: None,
-            users_banned: HashSet::new(),
+            users_banned: HashMap::new(),
         }
     }
 }
@@ -422,7 +434,7 @@ impl Handler<UserBanned> for CentralServerActor {
             msg.user_id, msg.reason
         );
 
-        self.users_banned.insert(msg.user_id);
+        self.users_banned.insert(msg.user_id, msg.reason.clone());
     }
 }
 
@@ -441,6 +453,13 @@ impl Handler<NearbyStationsRequestMessage> for CentralServerActor {
                 .unwrap_or_default();
             msg.response_addr
                 .do_send(RejectNotReplicaMessage { replica_addr });
+            return;
+        }
+
+        if let Some(reason) = self.users_banned.get(&msg.user_id) {
+            msg.response_addr.do_send(BanNotification {
+                reason: reason.clone(),
+            });
             return;
         }
 

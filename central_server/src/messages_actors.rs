@@ -75,6 +75,7 @@ pub struct SendElectionMessage {
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct NearbyStationsRequestMessage {
+    pub user_id: UserId,
     pub location: Location,
     pub radius: f64,
     pub response_addr: Addr<ConnectionActor>,

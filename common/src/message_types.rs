@@ -26,6 +26,7 @@ pub enum MessageType {
     OfflineRent,
     ReturnRent,
     UserBanned,
+    BanNotification,
 }
 
 impl MessageType {
@@ -57,6 +58,7 @@ impl MessageType {
             Self::OfflineRent => "OFFLINE_RENT",
             Self::ReturnRent => "RETURN_RENT",
             Self::UserBanned => "USER_BANNED",
+            Self::BanNotification => "BAN_NOTIFICATION",
         }
     }
 
@@ -88,6 +90,7 @@ impl MessageType {
             "OFFLINE_RENT" => Some(Self::OfflineRent),
             "RETURN_RENT" => Some(Self::ReturnRent),
             "USER_BANNED" => Some(Self::UserBanned),
+            "BAN_NOTIFICATION" => Some(Self::BanNotification),
             _ => None,
         }
     }

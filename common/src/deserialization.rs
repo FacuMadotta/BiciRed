@@ -266,3 +266,13 @@ impl Deserializable for UserBanned {
         }
     }
 }
+
+impl Deserializable for BanNotification {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 2);
+        Self {
+            reason: parts[1].to_string(),
+        }
+    }
+}

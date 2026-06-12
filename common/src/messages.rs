@@ -254,3 +254,9 @@ pub struct UserBanned {
     pub user_id: UserId,
     pub reason: String,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct BanNotification {
+    pub reason: String,
+}

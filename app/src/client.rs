@@ -74,7 +74,7 @@ impl AppClient {
 
     pub fn query_central(&mut self, location: Location, radius: f64) {
         let mut connected = false;
-        let query_msg = format!("NEARBY_QUERY|{}|{}|{}", location.x, location.y, radius);
+        let query_msg = format!("NEARBY_QUERY|{}|{}|{}|{}", self.user_id, location.x, location.y, radius);
 
         let mut retries = 0;
         const MAX_RETRIES: usize = 5;
@@ -114,6 +114,11 @@ impl AppClient {
                                 retries += 1;
                                 continue;
                             }
+                        }
+                        MessageType::BanNotification => {
+                            println!("\n[BAN] Has sido bloqueado por el servidor. Razón: {}", text);
+                            self.is_blocked = true;
+                            break;
                         }
                         _ => {
                             println!("[ERROR] Respuesta inesperada: {}", text);
