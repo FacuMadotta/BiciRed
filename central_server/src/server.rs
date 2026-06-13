@@ -63,9 +63,12 @@ impl Handler<RegisterPeerConnectionMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: RegisterPeerConnectionMessage, _ctx: &mut Self::Context) {
+        let ip_info = msg
+            .peer_addr
+            .unwrap_or_else(|| "IP Desconocida".to_string());
         println!(
-            "[SERVER] Registrando conexión del peer {} en la tabla de peers",
-            msg.server_id
+            "[SERVER] Registrando conexión del peer {} (IP: {}) en la tabla de peers",
+            msg.server_id, ip_info
         );
         self.peers.insert(msg.server_id, msg.connection_addr);
     }

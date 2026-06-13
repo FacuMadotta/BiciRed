@@ -246,6 +246,7 @@ impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentService
                 card_token: msg.request.card_token.clone(),
                 amount_cents: msg.request.amount_cents,
                 status: TransactionStatus::Captured,
+                timestamp: Instant::now(),
             },
         );
         if !self.take_money(&msg.request.card_token, msg.request.amount_cents) {
