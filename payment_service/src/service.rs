@@ -2,6 +2,7 @@ use crate::connection::ConnectionActor;
 use crate::HashMap;
 use actix::prelude::*;
 use common::*;
+use std::time::Instant;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum TransactionStatus {
@@ -15,6 +16,7 @@ pub struct Transaction {
     pub card_token: String,
     pub amount_cents: u32,
     pub status: TransactionStatus,
+    pub timestamp: Instant,
 }
 
 pub struct PaymentServiceActor {
@@ -50,10 +52,39 @@ impl PaymentServiceActor {
         }
         return false;
     }
+
+    fn cleanup_stuck_transactions(&mut self) {
+        let mut changes = false;
+        let now = Instant::now();
+
+        for (id, tx) in self.transactions.iter_mut() {
+            if tx.status == TransactionStatus::PreAuthorized && now.duration_since(tx.timestamp).as_secs() > 30 {
+                println!("\n[BANK] Detectada transacción atascada {}. Estación desconectada.", id);
+                println!("[BANK] Haciendo Auto-Rollback: Devolviendo ${} a la tarjeta {}", tx.amount_cents, tx.card_token);
+                
+                tx.status = TransactionStatus::RolledBack;
+                if let Some(saldo) = self.cards.get_mut(&tx.card_token) {
+                    *saldo += tx.amount_cents;
+                    changes = true;
+                }
+            }
+        }
+
+        if changes {
+            self.save_cards();
+        }
+    }
 }
 
 impl Actor for PaymentServiceActor {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        println!("[BANK] Iniciando monitor de transacciones...");
+        ctx.run_interval(std::time::Duration::from_secs(10), |act, _ctx| {
+            act.cleanup_stuck_transactions();
+        });
+    }
 }
 
 // Handlers de mensajes
@@ -96,6 +127,7 @@ impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentService
                     card_token: card_token.clone(),
                     amount_cents: amount,
                     status: TransactionStatus::PreAuthorized,
+                    timestamp: Instant::now(),
                 },
             );
             msg.response
