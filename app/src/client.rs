@@ -133,6 +133,7 @@ impl AppClient {
                             println!("[ERROR] Respuesta inesperada: {}", text);
                             self.rotate_server();
                             retries += 1;
+                            std::thread::sleep(std::time::Duration::from_secs(2));
                         }
                     }
                 }
@@ -143,6 +144,7 @@ impl AppClient {
                     );
                     self.rotate_server();
                     retries += 1;
+                    std::thread::sleep(std::time::Duration::from_secs(2));
                 }
             }
         }
