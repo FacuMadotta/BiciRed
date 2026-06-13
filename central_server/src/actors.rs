@@ -186,12 +186,12 @@ impl Handler<IncomingData> for ConnectionActor {
                         let ban_info = UserBanned::deserialize(message_text);
                         self.server_addr.do_send(ban_info);
                     }
-                    "IS_ALIVE" => {
-                        let is_alive = IsAlive::deserialize(message_text);
-                        self.elector_addr.do_send(LeaderAliveMessage {
-                            leader_id: is_alive.leader_id,
-                        });
-                    }
+                    // "IS_ALIVE" => {
+                    //     let is_alive = IsAlive::deserialize(message_text);
+                    //     self.elector_addr.do_send(LeaderAliveMessage {
+                    //         leader_id: is_alive.leader_id,
+                    //     });
+                    // }
                     "ELECTION_ACK" | "ACK" => {
                         self.elector_addr.do_send(ElectionAckMessage);
                     }
@@ -327,6 +327,10 @@ impl Handler<ConnectionClosed> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, _msg: ConnectionClosed, ctx: &mut Self::Context) {
+        if let Some(peer_id) = self.peer_id {
+            println!("[SERVER] Conexión cerrada con el peer {}", peer_id);
+            self.elector_addr.do_send(PeerDisconnectedMessage { server_id: peer_id });
+        }
         ctx.stop();
     }
 }
@@ -344,15 +348,6 @@ impl Handler<RemovePeerMessage> for ElectorActor {
 
     fn handle(&mut self, msg: RemovePeerMessage, _ctx: &mut Self::Context) {
         self.peer_servers.remove(&msg.server_id);
-    }
-}
-
-impl Handler<LeaderAliveMessage> for ConnectionActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        let alive_msg = format!("IS_ALIVE|{}\n", msg.leader_id);
-        let _ = self.socket.write_all(alive_msg.as_bytes());
     }
 }
 
@@ -620,6 +615,12 @@ impl Actor for ElectorActor {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.start_bully_timeout_monitor(ctx);
+        ctx.run_later(std::time::Duration::from_secs(3), |act, _ctx| {
+            if act.leader_id.is_none() {
+                println!("[ELECTION] Arranque de nodo. Iniciando elección inicial...");
+                act.init_election();
+            }
+        });
     }
 }
 

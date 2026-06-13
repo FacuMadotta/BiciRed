@@ -17,26 +17,16 @@ impl ElectorActor {
                         println!("[ELECTION] Coordinator timeout. Me proclamo lider");
                         actor.announce_leader();
                     } else {
+                        println!("[ELECTION] El nodo mayor falló en asumir. Reiniciando...");
                         actor.init_election();
                     }
                 }
-                return;
-            }
-
-            if actor.is_leader {
-                actor.leader_timeout = Instant::now();
-                actor.send_alive_to_peers();
-                return;
-            }
-
-            if actor.leader_timeout.elapsed() >= LEADER_TIMEOUT {
-                actor.init_election();
             }
         });
     }
 
     pub fn reset_leader_timeout(&mut self) {
-        self.leader_timeout = Instant::now();
+        //self.leader_timeout = Instant::now();
         self.election_in_progress = false;
         self.can_be_leader = true;
     }
@@ -66,7 +56,7 @@ impl ElectorActor {
         self.is_leader = true;
         self.leader_id = Some(self.server_id);
         self.election_in_progress = false;
-        self.leader_timeout = Instant::now();
+        //self.leader_timeout = Instant::now();
         self.can_be_leader = true;
         for addr in self.peer_servers.values() {
             addr.do_send(SendCoordinatorMessage {
@@ -78,33 +68,25 @@ impl ElectorActor {
             leader_id: self.leader_id,
         });
     }
-
-    pub fn send_alive_to_peers(&self) {
-        for addr in self.peer_servers.values() {
-            addr.do_send(LeaderAliveMessage {
-                leader_id: self.server_id,
-            });
-        }
-    }
 }
 
-impl Handler<LeaderAliveMessage> for ElectorActor {
-    type Result = ();
+// impl Handler<LeaderAliveMessage> for ElectorActor {
+//     type Result = ();
 
-    fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-        if self.leader_id != Some(msg.leader_id) {
-            self.is_leader = false;
-            self.leader_id = Some(msg.leader_id);
+//     fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
+//         if self.leader_id != Some(msg.leader_id) {
+//             self.is_leader = false;
+//             self.leader_id = Some(msg.leader_id);
 
-            self.central_server_addr.do_send(RoleUpdateMessage {
-                is_leader: self.is_leader,
-                leader_id: self.leader_id,
-            });
-        }
+//             self.central_server_addr.do_send(RoleUpdateMessage {
+//                 is_leader: self.is_leader,
+//                 leader_id: self.leader_id,
+//             });
+//         }
 
-        self.reset_leader_timeout();
-    }
-}
+//         self.reset_leader_timeout();
+//     }
+// }
 
 impl Handler<LeaderElectionMessage> for ElectorActor {
     type Result = ();
@@ -143,5 +125,28 @@ impl Handler<ElectionAckMessage> for ElectorActor {
     fn handle(&mut self, _msg: ElectionAckMessage, _ctx: &mut Self::Context) {
         self.can_be_leader = false;
         self.leader_timeout = Instant::now();
+    }
+}
+
+impl Handler<PeerDisconnectedMessage> for ElectorActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PeerDisconnectedMessage, _ctx: &mut Self::Context) {
+        self.peer_servers.remove(&msg.server_id);
+
+        if Some(msg.server_id) == self.leader_id {
+            println!("[ELECTION] ¡El Líder ha caído! Iniciando algoritmo Bully...");
+            
+            self.leader_id = None;
+            self.is_leader = false;
+            self.election_in_progress = true;
+
+            self.central_server_addr.do_send(RoleUpdateMessage {
+                is_leader: false,
+                leader_id: None,
+            });
+            
+            self.init_election();
+        }
     }
 }

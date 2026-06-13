@@ -18,11 +18,11 @@ pub struct ValidateUserMessage {
 }
 
 // Connection --> Election
-#[derive(Message, Debug, Clone)]
-#[rtype(result = "()")]
-pub struct LeaderAliveMessage {
-    pub leader_id: ServerId,
-}
+// #[derive(Message, Debug, Clone)]
+// #[rtype(result = "()")]
+// pub struct LeaderAliveMessage {
+//     pub leader_id: ServerId,
+// }
 
 // Connection --> Election
 #[derive(Message, Debug, Clone)]
@@ -159,4 +159,10 @@ pub struct ReplicaSyncMessage {
 #[rtype(result = "()")]
 pub struct UpdateStationTimestamp {
     pub station_id: StationId,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerDisconnectedMessage {
+    pub server_id: common::ServerId,
 }
