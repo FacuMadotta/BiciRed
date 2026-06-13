@@ -16,6 +16,7 @@ const OFFLINE_PREFIX: &str = "inventario_estacion_";
 const TIMEOUT_SECS: u64 = 30; // Tiempo máximo para esperar un commit antes de abortar la transacción
 const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Monto filo de Pre Autorización
 const AMOUNT_PER_MINUTE_CENTS: u32 = 50; // Costo por minuto de alquiler
+const TIME_TO_RETURN: u64 = 60; // Tiempo máximo en minutos para devolver la bicicleta antes de cobrar penalización completa
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
 pub struct Station {
@@ -170,6 +171,7 @@ pub struct StationActor {
     my_ip: String,
     payment_ip: String,
     pending_validations: HashMap<UserId, PendingValidation>,
+    active_rentals: std::collections::HashMap<common::UserId, u64>,
 }
 
 impl StationActor {
@@ -188,6 +190,7 @@ impl StationActor {
             my_ip,
             payment_ip,
             pending_validations: HashMap::new(),
+            active_rentals: HashMap::new(),
         }
     }
 
@@ -225,6 +228,12 @@ impl StationActor {
             if let Some(tx) = self.pending_transactions.remove(transaction_id) {
                 self.station.confirm_reservation(tx.slot_index);
                 self.station.save_inventory();
+
+                if let Some(user_id) = self.client_id_from_rental(transaction_id) {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                    self.active_rentals.insert(user_id, now);
+                }
+
                 tx.client_addr.do_send(RentConfirmed {
                     bike_id: tx.bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
@@ -860,6 +869,9 @@ impl StationActor {
                     &msg.request.card_token,
                 );
 
+                let now = time.duration_since(UNIX_EPOCH).expect("Error").as_secs();
+                self.active_rentals.insert(msg.request.user_id, now);
+
                 msg.response.do_send(RentConfirmed {
                     bike_id: bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
@@ -870,6 +882,38 @@ impl StationActor {
                     rental_id,
                 });
             }
+        }
+    }
+
+    fn check_unreturned_bikes(&mut self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut usuarios_a_banear = Vec::new();
+
+        for (&user_id, &tiempo_inicio) in &self.active_rentals {
+            if now.saturating_sub(tiempo_inicio) > TIME_TO_RETURN { 
+                usuarios_a_banear.push(user_id);
+            }
+        }
+
+        for user_id in usuarios_a_banear {
+            println!("\n[ESTACIÓN] El usuario {} superó el tiempo máximo de alquiler.", user_id);
+            println!("[ESTACIÓN] Solicitando baneo al Servidor Central...");
+            
+            let ban_msg = UserBanned {
+                user_id,
+                reason: "Bicicleta robada / no devuelta a tiempo".to_string(),
+            };
+            
+            let ban_msg_serialized = ban_msg.serialize();
+            
+            if let Some(ref sender) = self.central_server {
+                let _ = sender.send(ban_msg_serialized);
+            }
+            self.active_rentals.remove(&user_id);
         }
     }
 }
@@ -887,6 +931,7 @@ impl Actor for StationActor {
             act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();
+            act.check_unreturned_bikes();
             let ping_msg = format!("PING|{}\n", act.station.id);
             if let Some(ref sender) = act.central_server {
                 let _ = sender.send(ping_msg);
@@ -984,6 +1029,11 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
         if self.station.is_slot_free(slot) {
             self.station.return_bike(slot, bike_id);
             self.station.save_inventory();
+
+            if let Some(user_id) = self.client_id_from_rental(&rental_id) {
+                self.active_rentals.remove(&user_id);
+            }
+
             let amount_cents = self.station.calculate_amount(started_at_secs, now_secs);
             let capture_msg = CapturePayment {
                 transaction_id: rental_id,
