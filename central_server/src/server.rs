@@ -83,7 +83,7 @@ impl Handler<UpdateStationTimestamp> for CentralServerActor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            
+
             station.updated_at_secs = now;
         }
     }

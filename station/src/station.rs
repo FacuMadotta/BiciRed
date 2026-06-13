@@ -230,7 +230,10 @@ impl StationActor {
                 self.station.save_inventory();
 
                 if let Some(user_id) = self.client_id_from_rental(transaction_id) {
-                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
                     self.active_rentals.insert(user_id, now);
                 }
 
@@ -894,22 +897,25 @@ impl StationActor {
         let mut usuarios_a_banear = Vec::new();
 
         for (&user_id, &tiempo_inicio) in &self.active_rentals {
-            if now.saturating_sub(tiempo_inicio) > TIME_TO_RETURN { 
+            if now.saturating_sub(tiempo_inicio) > TIME_TO_RETURN {
                 usuarios_a_banear.push(user_id);
             }
         }
 
         for user_id in usuarios_a_banear {
-            println!("\n[ESTACIÓN] El usuario {} superó el tiempo máximo de alquiler.", user_id);
+            println!(
+                "\n[ESTACIÓN] El usuario {} superó el tiempo máximo de alquiler.",
+                user_id
+            );
             println!("[ESTACIÓN] Solicitando baneo al Servidor Central...");
-            
+
             let ban_msg = UserBanned {
                 user_id,
                 reason: "Bicicleta robada / no devuelta a tiempo".to_string(),
             };
-            
+
             let ban_msg_serialized = ban_msg.serialize();
-            
+
             if let Some(ref sender) = self.central_server {
                 let _ = sender.send(ban_msg_serialized);
             }

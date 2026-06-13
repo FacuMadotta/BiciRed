@@ -294,7 +294,8 @@ impl Handler<IncomingData> for ConnectionActor {
                     "PING" => {
                         if parts.len() == 2 {
                             if let Ok(id) = parts[1].parse::<StationId>() {
-                                self.server_addr.do_send(UpdateStationTimestamp { station_id: id });
+                                self.server_addr
+                                    .do_send(UpdateStationTimestamp { station_id: id });
                             }
                         }
                     }
@@ -329,7 +330,8 @@ impl Handler<ConnectionClosed> for ConnectionActor {
     fn handle(&mut self, _msg: ConnectionClosed, ctx: &mut Self::Context) {
         if let Some(peer_id) = self.peer_id {
             println!("[SERVER] Conexión cerrada con el peer {}", peer_id);
-            self.elector_addr.do_send(PeerDisconnectedMessage { server_id: peer_id });
+            self.elector_addr
+                .do_send(PeerDisconnectedMessage { server_id: peer_id });
         }
         ctx.stop();
     }

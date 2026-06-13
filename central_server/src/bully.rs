@@ -136,7 +136,7 @@ impl Handler<PeerDisconnectedMessage> for ElectorActor {
 
         if Some(msg.server_id) == self.leader_id {
             println!("[ELECTION] ¡El Líder ha caído! Iniciando algoritmo Bully...");
-            
+
             self.leader_id = None;
             self.is_leader = false;
             self.election_in_progress = true;
@@ -145,7 +145,7 @@ impl Handler<PeerDisconnectedMessage> for ElectorActor {
                 is_leader: false,
                 leader_id: None,
             });
-            
+
             self.init_election();
         }
     }
