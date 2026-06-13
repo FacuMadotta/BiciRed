@@ -75,8 +75,8 @@ fn main() {
                 io::stdin().read_line(&mut r_input).unwrap();
                 let radius: f64 = r_input.trim().parse().unwrap_or(5.0);
 
-                app.query_central(Location { x, y}, radius)
-            },
+                app.query_central(Location { x, y }, radius)
+            }
             "2" => {
                 if app.cached_stations.is_empty() {
                     println!("Primero tenés que consultar las estaciones (Opción 1).");
@@ -121,18 +121,19 @@ fn main() {
                     println!("Primero tenés que consultar las estaciones (Opción 1) para buscar a dónde devolverla.");
                     continue;
                 }
-            
+
                 let mut station_input = String::new();
                 print!("> Ingresá el ID de la estación para devolver la bici: ");
                 io::stdout().flush().unwrap();
                 io::stdin().read_line(&mut station_input).unwrap();
                 let target_id: usize = station_input.trim().parse().unwrap_or(0);
-            
-                let target_addr = app.cached_stations
+
+                let target_addr = app
+                    .cached_stations
                     .iter()
                     .find(|s| s.station_id == target_id as u32)
                     .map(|s| s.station_addr.clone());
-            
+
                 if let Some(addr) = target_addr {
                     let mut slot_input = String::new();
                     print!("> Ingresá el número de slot libre: ");
@@ -143,7 +144,7 @@ fn main() {
                 } else {
                     println!("Estación no encontrada en la caché local.");
                 }
-            },
+            }
             "4" => {
                 println!("Cerrando aplicación...");
                 break;

@@ -167,4 +167,3 @@ impl Handler<NewConnectionMessage> for SpawnerActor {
         ConnectionActor::new(msg.0, self.payment_service_addr.clone()).start();
     }
 }
-

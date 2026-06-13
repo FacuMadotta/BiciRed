@@ -1,20 +1,20 @@
 use crate::connection::ConnectionActor;
 use actix::prelude::*;
 use common::*;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
+use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
-use std::io::Read;
 use std::sync::mpsc::Sender;
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde::{Deserialize, Serialize};
 
 const PENDING_RENTS_PREFIX: &str = "pending_rents_";
 const PENDING_CHARGES_PREFIX: &str = "pending_charges_";
 const OFFLINE_PREFIX: &str = "inventario_estacion_";
 const TIMEOUT_SECS: u64 = 30; // Tiempo máximo para esperar un commit antes de abortar la transacción
-const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Monto filo de Pre Autorización 
+const PRE_AUTH_AMOUNT_CENTS: u32 = 100; // Monto filo de Pre Autorización
 const AMOUNT_PER_MINUTE_CENTS: u32 = 50; // Costo por minuto de alquiler
 
 // Estructura que maneja la lógica de la estación, incluyendo el estado de los slots y las bicicletas.
@@ -41,16 +41,21 @@ impl Station {
     pub fn new(id: StationId, location: Location, num_slots: usize, num_bikes: usize) -> Self {
         let filename = format!("{}{}.json", OFFLINE_PREFIX, id);
         let mut slots = if let Ok(content) = std::fs::read_to_string(&filename) {
-            println!("[RECONECTANDO] Inventario previo detectado para estación {}. Cargando...", id);
-            serde_json::from_str::<Vec<Slot>>(&content).unwrap_or_else(|_| {
-                Self::default_slots(num_slots, num_bikes)
-            })
+            println!(
+                "[RECONECTANDO] Inventario previo detectado para estación {}. Cargando...",
+                id
+            );
+            serde_json::from_str::<Vec<Slot>>(&content)
+                .unwrap_or_else(|_| Self::default_slots(num_slots, num_bikes))
         } else {
             Self::default_slots(num_slots, num_bikes)
         };
         for slot in &mut slots {
             if let SlotState::Reserved { bike_id } = slot.state {
-                println!("[RECONECTANDO] Revertida reserva del slot {} (Bici {}) debido a reinicio.", slot.index, bike_id);
+                println!(
+                    "[RECONECTANDO] Revertida reserva del slot {} (Bici {}) debido a reinicio.",
+                    slot.index, bike_id
+                );
                 slot.state = SlotState::Occupied { bike_id };
             }
         }
@@ -66,7 +71,9 @@ impl Station {
             .map(|i| Slot {
                 index: i,
                 state: if i < num_bikes {
-                    SlotState::Occupied { bike_id: i as BikeId }
+                    SlotState::Occupied {
+                        bike_id: i as BikeId,
+                    }
                 } else {
                     SlotState::Empty
                 },
@@ -84,7 +91,7 @@ impl Station {
     fn reserve_bike(&mut self, slot_index: usize) -> Option<BikeId> {
         if let Some(slot) = self.slots.get_mut(slot_index) {
             if let SlotState::Occupied { bike_id } = slot.state {
-                slot.state = SlotState::Reserved{ bike_id }; // Marcar el slot como reservado antes de commit
+                slot.state = SlotState::Reserved { bike_id }; // Marcar el slot como reservado antes de commit
                 return Some(bike_id);
             }
         }
@@ -130,7 +137,10 @@ impl Station {
         let filename = format!("{}{}.json", OFFLINE_PREFIX, self.id);
         if let Ok(json_content) = serde_json::to_string(&self.slots) {
             if let Err(e) = std::fs::write(&filename, json_content) {
-                eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el inventario: {}", e);
+                eprintln!(
+                    "[ERROR PERSISTENCIA] No se pudo guardar el inventario: {}",
+                    e
+                );
             }
         }
     }
@@ -195,7 +205,7 @@ impl StationActor {
     fn send_msg_to_payment(&mut self, msg: String) -> Result<(), ()> {
         if let Some(tx) = &self.payment_service {
             if tx.send(msg).is_err() {
-                self.payment_service = None; 
+                self.payment_service = None;
                 return Err(());
             }
             Ok(())
@@ -350,7 +360,7 @@ impl StationActor {
                     let central_ok = if let Some(ref sender) = self.central_server {
                         sender.send(central_msg_serialized).is_ok()
                     } else {
-                        false 
+                        false
                     };
 
                     // 3. Verificamos que AMBOS se hayan enterado
@@ -396,7 +406,8 @@ impl StationActor {
                         amount_cents: charge
                             .get("amount_cents")
                             .and_then(|v| v.as_u64())
-                            .expect("Error al parsear amount_cents") as u32,
+                            .expect("Error al parsear amount_cents")
+                            as u32,
                     };
                     let msg_serialized = capture_msg.serialize();
                     let payment_ok = self.send_msg_to_payment(msg_serialized).is_ok();
@@ -415,7 +426,7 @@ impl StationActor {
                     let central_ok = if let Some(ref sender) = self.central_server {
                         sender.send(central_msg_serialized).is_ok()
                     } else {
-                        false 
+                        false
                     };
 
                     if payment_ok && central_ok {
@@ -441,36 +452,53 @@ impl StationActor {
     }
 
     fn sync_with_central(&mut self) {
-        let available_bikes = self.station.slots.iter().filter(|s| !matches!(s.state, SlotState::Empty)).count();
+        let available_bikes = self
+            .station
+            .slots
+            .iter()
+            .filter(|s| !matches!(s.state, SlotState::Empty))
+            .count();
         let free_slots = self.station.slots.len() - available_bikes;
 
-        let occupieds: Vec<String> = self.station.slots.iter()
-        .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
-        .map(|s| s.index.to_string())
-        .collect();
+        let occupieds: Vec<String> = self
+            .station
+            .slots
+            .iter()
+            .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
+            .map(|s| s.index.to_string())
+            .collect();
 
-        let frees: Vec<String> = self.station.slots.iter()
-        .filter(|s| matches!(s.state, SlotState::Empty))
-        .map(|s| s.index.to_string())
-        .collect();
+        let frees: Vec<String> = self
+            .station
+            .slots
+            .iter()
+            .filter(|s| matches!(s.state, SlotState::Empty))
+            .map(|s| s.index.to_string())
+            .collect();
 
         let occupied_map = occupieds.join(",");
         let free_map = frees.join(",");
-    
+
         let status = StationStatus {
             station_id: self.station.id,
-            location: Location { x: self.station.location.x, y: self.station.location.y },
+            location: Location {
+                x: self.station.location.x,
+                y: self.station.location.y,
+            },
             available_bikes: available_bikes as u8,
             free_slots: free_slots as u8,
-            updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            updated_at_secs: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             station_addr: self.my_ip.clone(),
             slots_occupied: occupied_map,
             slots_frees: free_map,
         };
-    
+
         let update_msg = StationUpdate { station: status };
         let payload = format!("{}\n", update_msg.serialize());
-    
+
         if let Some(ref sender) = self.central_server {
             if sender.send(payload).is_err() {
                 println!("[RED] Conexión perdida con el Líder.");
@@ -491,15 +519,21 @@ impl StationActor {
         let location = self.station.location.clone();
         let num_slots = self.station.slots.len();
 
-        let occupieds: Vec<String> = self.station.slots.iter()
-        .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
-        .map(|s| s.index.to_string())
-        .collect();
+        let occupieds: Vec<String> = self
+            .station
+            .slots
+            .iter()
+            .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
+            .map(|s| s.index.to_string())
+            .collect();
 
-        let frees: Vec<String> = self.station.slots.iter()
-        .filter(|s| matches!(s.state, SlotState::Empty))
-        .map(|s| s.index.to_string())
-        .collect();
+        let frees: Vec<String> = self
+            .station
+            .slots
+            .iter()
+            .filter(|s| matches!(s.state, SlotState::Empty))
+            .map(|s| s.index.to_string())
+            .collect();
 
         let occupied_map = occupieds.join(",");
         let free_map = frees.join(",");
@@ -514,10 +548,16 @@ impl StationActor {
                     Ok(mut stream) => {
                         let status = StationStatus {
                             station_id,
-                            location: Location { x: location.x, y: location.y },
+                            location: Location {
+                                x: location.x,
+                                y: location.y,
+                            },
                             available_bikes: 0,
                             free_slots: num_slots as u8,
-                            updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                            updated_at_secs: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
                             station_addr: my_ip.clone(),
                             slots_occupied: occupied_map.clone(),
                             slots_frees: free_map.clone(),
@@ -526,20 +566,30 @@ impl StationActor {
                         let payload = format!("{}\n", update_msg.serialize());
 
                         if stream.write_all(payload.as_bytes()).is_ok() {
-                            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                            let _ =
+                                stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
                             let mut buf = [0u8; 1024];
                             match stream.read(&mut buf) {
                                 Ok(n) if n > 0 => {
                                     let response = String::from_utf8_lossy(&buf[..n]);
                                     if response.starts_with("NOT_LEADER") {
-                                        println!("[RECONEXIÓN CENTRAL] Nodo {} no es el Líder.", target_ip);
+                                        println!(
+                                            "[RECONEXIÓN CENTRAL] Nodo {} no es el Líder.",
+                                            target_ip
+                                        );
                                         server_idx = (server_idx + 1) % server_addrs.len();
                                         std::thread::sleep(std::time::Duration::from_secs(1));
                                         continue;
                                     }
                                 }
-                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                                    println!("[RECONEXIÓN CENTRAL] ¡Líder encontrado en {}!", target_ip);
+                                Err(e)
+                                    if e.kind() == std::io::ErrorKind::WouldBlock
+                                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                                {
+                                    println!(
+                                        "[RECONEXIÓN CENTRAL] ¡Líder encontrado en {}!",
+                                        target_ip
+                                    );
                                     let _ = stream.set_read_timeout(None);
 
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
@@ -578,13 +628,17 @@ impl StationActor {
                                             } else {
                                                 format!("{}\n", msg)
                                             };
-                                            if stream_writer.write_all(formatted.as_bytes()).is_err() {
+                                            if stream_writer
+                                                .write_all(formatted.as_bytes())
+                                                .is_err()
+                                            {
                                                 break;
                                             }
                                             let _ = stream_writer.flush();
                                         }
                                         println!("[CENTRAL SENDER] Hilo de envío finalizado por error o desconexión.");
-                                        let _ = stream_to_shutdown.shutdown(std::net::Shutdown::Both);
+                                        let _ =
+                                            stream_to_shutdown.shutdown(std::net::Shutdown::Both);
                                     });
 
                                     let receiver_station_addr = station_addr.clone();
@@ -594,18 +648,25 @@ impl StationActor {
                                             match stream_reader.read(&mut buffer) {
                                                 Ok(0) | Err(_) => {
                                                     println!("[CENTRAL RECEIVER] Conexión con central cerrada o caída.");
-                                                    receiver_station_addr.do_send(CentralServerDisconnected);
+                                                    receiver_station_addr
+                                                        .do_send(CentralServerDisconnected);
                                                     break;
                                                 }
                                                 Ok(n) => {
-                                                    let data = String::from_utf8_lossy(&buffer[..n]);
+                                                    let data =
+                                                        String::from_utf8_lossy(&buffer[..n]);
                                                     for line in data.lines() {
                                                         let message_text = line.trim();
                                                         if message_text.is_empty() {
                                                             continue;
                                                         }
-                                                        let prefix = message_text.split('|').next().unwrap_or("");
-                                                        if let Some(message_type) = MessageType::from_str(prefix) {
+                                                        let prefix = message_text
+                                                            .split('|')
+                                                            .next()
+                                                            .unwrap_or("");
+                                                        if let Some(message_type) =
+                                                            MessageType::from_str(prefix)
+                                                        {
                                                             match message_type {
                                                                 MessageType::UserValidationResult => {
                                                                     receiver_station_addr.do_send(UserValidationResult::deserialize(message_text));
@@ -649,16 +710,23 @@ impl StationActor {
 
     fn abort_expired_transactions(&mut self) {
         let now = SystemTime::now();
-        let expired_transactions: Vec<String> = self.pending_transactions.iter()
+        let expired_transactions: Vec<String> = self
+            .pending_transactions
+            .iter()
             .filter_map(|(tx_id, tx)| {
-                if now.duration_since(tx.started_at).unwrap_or_default().as_secs() > TIMEOUT_SECS {
+                if now
+                    .duration_since(tx.started_at)
+                    .unwrap_or_default()
+                    .as_secs()
+                    > TIMEOUT_SECS
+                {
                     Some(tx_id.clone())
                 } else {
                     None
                 }
             })
             .collect();
-        
+
         for tx_id in expired_transactions {
             if let Some(tx) = self.pending_transactions.remove(&tx_id) {
                 println!("[TIMEOUT] Transacción {} expirada. Abortando...", tx_id);
@@ -679,12 +747,15 @@ impl StationActor {
 
     fn try_reconnect_payment(&mut self, ctx: &mut Context<Self>) {
         if self.payment_service.is_some() {
-            return; 
+            return;
         }
 
         if let Ok(stream) = TcpStream::connect(&self.payment_ip) {
-            println!("[PAYMENT] ¡Conexión establecida con el servicio de pagos en {}!", self.payment_ip);
-            
+            println!(
+                "[PAYMENT] ¡Conexión establecida con el servicio de pagos en {}!",
+                self.payment_ip
+            );
+
             let (tx, rx) = std::sync::mpsc::channel::<String>();
             let stream_writer = stream.try_clone().expect("Error clonando escritura");
             let mut stream_reader = stream.try_clone().expect("Error clonando lectura");
@@ -693,7 +764,9 @@ impl StationActor {
             std::thread::spawn(move || {
                 let mut writer = stream_writer;
                 for msg in rx {
-                    if writer.write_all(msg.as_bytes()).is_err() { break; }
+                    if writer.write_all(msg.as_bytes()).is_err() {
+                        break;
+                    }
                     let _ = writer.flush();
                 }
             });
@@ -715,9 +788,15 @@ impl StationActor {
                                 }
                                 let message_type = MessageType::deserialize(text);
                                 match message_type {
-                                    MessageType::VoteCommit => station_addr.do_send(VoteCommit::deserialize(text)),
-                                    MessageType::VoteAbort => station_addr.do_send(VoteAbort::deserialize(text)),
-                                    MessageType::ReservationRejected => station_addr.do_send(ReservationRejected::deserialize(text)),
+                                    MessageType::VoteCommit => {
+                                        station_addr.do_send(VoteCommit::deserialize(text))
+                                    }
+                                    MessageType::VoteAbort => {
+                                        station_addr.do_send(VoteAbort::deserialize(text))
+                                    }
+                                    MessageType::ReservationRejected => {
+                                        station_addr.do_send(ReservationRejected::deserialize(text))
+                                    }
                                     _ => {}
                                 }
                             }
@@ -730,7 +809,11 @@ impl StationActor {
         }
     }
 
-    fn process_rent_request(&mut self, msg: RequestMessage<RentRequest, ConnectionActor>, time: SystemTime) {
+    fn process_rent_request(
+        &mut self,
+        msg: RequestMessage<RentRequest, ConnectionActor>,
+        time: SystemTime,
+    ) {
         let bike_id = self
             .station
             .reserve_bike(msg.request.slot_index)
@@ -831,45 +914,48 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
         }
 
         let user_id = msg.request.user_id;
-        let validation_msg = ValidateUser {
-            user_id,
-        };
+        let validation_msg = ValidateUser { user_id };
         let validation_msg_serialized = validation_msg.serialize();
 
         if let Some(ref sender) = self.central_server {
             if sender.send(validation_msg_serialized).is_ok() {
-                self.pending_validations.insert(user_id, PendingValidation {
-                    msg,
-                    started_at: SystemTime::now(),
-                });
+                self.pending_validations.insert(
+                    user_id,
+                    PendingValidation {
+                        msg,
+                        started_at: SystemTime::now(),
+                    },
+                );
                 return;
             } else {
                 println!("[RED] Conexión perdida con el Líder durante validación.");
                 self.central_server = None;
             }
-        } 
-        
+        }
+
         println!("[VALIDACIÓN OFFLINE] No se pudo contactar al Líder para validar usuario. Degradando a validación offline...");
         self.process_rent_request(msg, SystemTime::now());
     }
 }
 
-    
 impl Handler<UserValidationResult> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: UserValidationResult, _ctx: &mut Self::Context) {
-        let validation =  self.pending_validations.remove(&msg.user_id);
-            
+        let validation = self.pending_validations.remove(&msg.user_id);
+
         if !msg.is_valid {
             if let Some(validation) = validation {
                 validation.msg.response.do_send(RentRejected {
-                    reason: msg.reason.clone().unwrap_or("Usuario no válido".to_string()),
+                    reason: msg
+                        .reason
+                        .clone()
+                        .unwrap_or("Usuario no válido".to_string()),
                 });
             }
             return;
         }
-        
+
         if let Some(validation) = validation {
             self.process_rent_request(validation.msg, validation.started_at);
         }
@@ -910,11 +996,11 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
                     // --- FLUJO OFFLINE
                     println!("[ALERTA OFFLINE] Falló comunicación con Payment durante devolución. Registrando cobro diferido...");
 
-                    self.save_pending_charge(&msg.request.rental_id, amount_cents, bike_id); 
+                    self.save_pending_charge(&msg.request.rental_id, amount_cents, bike_id);
                 }
             }
             msg.response.do_send(ReturnConfirmed {
-                charged_cents: amount_cents, 
+                charged_cents: amount_cents,
                 timestamp_secs: now_secs,
             });
 
@@ -959,7 +1045,9 @@ impl Handler<RequestMessage<VoteAbort, ConnectionActor>> for StationActor {
         let rollback_msg = rollback_msg.serialize();
         let _ = self.send_msg_to_payment(rollback_msg); //ignoramos, por timeout rollbackeara
 
-        let transaction = self.pending_transactions.remove(&msg.request.transaction_id);
+        let transaction = self
+            .pending_transactions
+            .remove(&msg.request.transaction_id);
         if let Some(tx) = transaction {
             self.station.cancel_reservation(tx.slot_index, tx.bike_id);
             self.station.save_inventory();
@@ -1004,7 +1092,7 @@ impl Handler<ReservationRejected> for StationActor {
 
     fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
         let client_id = self.client_id_from_rental(&msg.transaction_id);
-    
+
         // Enviar mensaje a central server para que bloquee al usuario
         if let Some(user_id) = client_id {
             let ban_msg = UserBanned {

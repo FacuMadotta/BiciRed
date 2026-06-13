@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
     );
 
     let station_addr = StationActor::create(move |_ctx| {
-        StationActor::new(station_data, server_addrs, my_ip_for_actor, payment_ip) 
+        StationActor::new(station_data, server_addrs, my_ip_for_actor, payment_ip)
     });
 
     let spawner = SpawnerActor {
@@ -54,7 +54,7 @@ async fn main() -> std::io::Result<()> {
     }
     .start();
 
-    Acceptor::new(my_ip, move |stream| { 
+    Acceptor::new(my_ip, move |stream| {
         println!("Nueva conexión aceptada, levantando ConnectionActor");
         spawner.do_send(NewConnectionMessage(stream));
     })
@@ -65,4 +65,3 @@ async fn main() -> std::io::Result<()> {
     std::future::pending::<()>().await;
     Ok(())
 }
-

@@ -272,7 +272,7 @@ impl Handler<IncomingData> for ConnectionActor {
                                     }
                                 }
                             }
-                            
+
                             let mut banned_users = HashMap::new();
                             if parts.len() >= 3 && !parts[2].is_empty() {
                                 for user_str in parts[2].split(';') {
@@ -287,7 +287,7 @@ impl Handler<IncomingData> for ConnectionActor {
 
                             self.server_addr.do_send(ReplicaSyncMessage {
                                 station_table: new_table,
-                                banned_users: banned_users, 
+                                banned_users: banned_users,
                             });
                         }
                     }
@@ -460,7 +460,7 @@ impl Actor for CentralServerActor {
                     println!("[SERVER LÍDER] Estación {} eliminada por inactividad.", id);
                     act.station_table.remove(&id);
                 }
-                act.broadcast_replica_sync(); 
+                act.broadcast_replica_sync();
             }
         });
     }
@@ -510,10 +510,7 @@ impl Handler<ValidateUserMessage> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: ValidateUserMessage, _ctx: &mut Context<Self>) {
-        println!(
-            "[SERVER] Validando usuario {}",
-            msg.user_id
-        );
+        println!("[SERVER] Validando usuario {}", msg.user_id);
 
         let validation_result = if let Some(reason) = self.users_banned.get(&msg.user_id) {
             UserValidationResult {
@@ -701,7 +698,11 @@ impl Handler<SendReplicaSyncMessage> for ConnectionActor {
             banned_users_str.push(format!("{},{}", user_id, reason));
         }
 
-        let payload = format!("REPLICA_SYNC|{}|{}\n", stations_str.join(";"), banned_users_str.join(";"));
+        let payload = format!(
+            "REPLICA_SYNC|{}|{}\n",
+            stations_str.join(";"),
+            banned_users_str.join(";")
+        );
         let _ = self.socket.write_all(payload.as_bytes());
     }
 }

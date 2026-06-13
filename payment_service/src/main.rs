@@ -1,8 +1,8 @@
 use actix::prelude::*;
 use common::{Acceptor, NewConnectionMessage};
 use std::collections::HashMap;
-use std::fs;
 use std::env;
+use std::fs;
 mod connection;
 mod service;
 use connection::SpawnerActor;
@@ -21,7 +21,10 @@ async fn main() -> std::io::Result<()> {
     println!("[BANK] Iniciando PaymentService en {}", ip);
 
     let tarjetas_db = cargar_tarjetas(&tarjetas_csv);
-    println!("[BANK] Base de datos cargada. Tarjetas registradas: {}", tarjetas_db.len());
+    println!(
+        "[BANK] Base de datos cargada. Tarjetas registradas: {}",
+        tarjetas_db.len()
+    );
 
     let payment_service_addr = PaymentServiceActor::new(tarjetas_db, tarjetas_csv.clone()).start();
 

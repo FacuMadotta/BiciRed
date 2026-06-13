@@ -58,10 +58,18 @@ impl PaymentServiceActor {
         let now = Instant::now();
 
         for (id, tx) in self.transactions.iter_mut() {
-            if tx.status == TransactionStatus::PreAuthorized && now.duration_since(tx.timestamp).as_secs() > 30 {
-                println!("\n[BANK] Detectada transacción atascada {}. Estación desconectada.", id);
-                println!("[BANK] Haciendo Auto-Rollback: Devolviendo ${} a la tarjeta {}", tx.amount_cents, tx.card_token);
-                
+            if tx.status == TransactionStatus::PreAuthorized
+                && now.duration_since(tx.timestamp).as_secs() > 30
+            {
+                println!(
+                    "\n[BANK] Detectada transacción atascada {}. Estación desconectada.",
+                    id
+                );
+                println!(
+                    "[BANK] Haciendo Auto-Rollback: Devolviendo ${} a la tarjeta {}",
+                    tx.amount_cents, tx.card_token
+                );
+
                 tx.status = TransactionStatus::RolledBack;
                 if let Some(saldo) = self.cards.get_mut(&tx.card_token) {
                     *saldo += tx.amount_cents;
@@ -206,12 +214,8 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
                 return;
             };
 
-        if status == TransactionStatus::Commited
-            && self.take_money(&card_token, amount_cents)
-        {
-            if let Some(transaction) =
-                self.transactions.get_mut(&msg.request.transaction_id)
-            {
+        if status == TransactionStatus::Commited && self.take_money(&card_token, amount_cents) {
+            if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
                 transaction.status = TransactionStatus::Captured;
             }
             return;
@@ -241,15 +245,14 @@ impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentService
             Transaction {
                 card_token: msg.request.card_token.clone(),
                 amount_cents: msg.request.amount_cents,
-                status: TransactionStatus::Captured, 
+                status: TransactionStatus::Captured,
             },
         );
         if !self.take_money(&msg.request.card_token, msg.request.amount_cents) {
-            msg.response
-                .do_send(ReservationRejected {
-                    transaction_id: msg.request.transaction_id.clone(),
-                    reason: "Fondos insuficientes".to_string(),
-                });
-        } 
+            msg.response.do_send(ReservationRejected {
+                transaction_id: msg.request.transaction_id.clone(),
+                reason: "Fondos insuficientes".to_string(),
+            });
+        }
     }
 }

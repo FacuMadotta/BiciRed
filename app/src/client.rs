@@ -1,9 +1,7 @@
+use common::BanNotification;
 use rand::seq::SliceRandom;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use common::{
-    BanNotification
-};
 
 use common::{
     Deserializable, Location, MessageType, NearbyResponse, RentConfirmed, RentRejected,
@@ -79,7 +77,10 @@ impl AppClient {
 
     pub fn query_central(&mut self, location: Location, radius: f64) {
         let mut connected = false;
-        let query_msg = format!("NEARBY_QUERY|{}|{}|{}|{}", self.user_id, location.x, location.y, radius);
+        let query_msg = format!(
+            "NEARBY_QUERY|{}|{}|{}|{}",
+            self.user_id, location.x, location.y, radius
+        );
 
         let mut retries = 0;
         const MAX_RETRIES: usize = 5;
@@ -99,7 +100,7 @@ impl AppClient {
                             );
                             for st in &response.stations {
                                 println!(
-                                    " - Estación {} | Bicis: {} | Libres: {}", 
+                                    " - Estación {} | Bicis: {} | Libres: {}",
                                     st.station_id, st.available_bikes, st.free_slots
                                 );
                                 println!("   [Slots con Bici]: [{}]", st.slots_occupied);
@@ -125,7 +126,10 @@ impl AppClient {
                         }
                         MessageType::BanNotification => {
                             let ban_msg = BanNotification::deserialize(text);
-                            println!("\n[BAN] Has sido bloqueado por el servidor. Razón: {}", ban_msg.reason);
+                            println!(
+                                "\n[BAN] Has sido bloqueado por el servidor. Razón: {}",
+                                ban_msg.reason
+                            );
                             self.is_blocked = true;
                             break;
                         }
@@ -165,6 +169,11 @@ impl AppClient {
     }
 
     pub fn rent_station(&mut self, addr: &str, slot_index: usize, card_token: &str) {
+        if self.current_rental.is_some() {
+            println!("\n[ERROR] Ya tenés un alquiler en curso. Devolvé la bici actual antes de sacar otra.");
+            return;
+        }
+
         if self.is_blocked {
             println!("\n[ERROR] Tu cuenta está bloqueada.");
             return;
@@ -214,13 +223,16 @@ impl AppClient {
                     bike_id: conf.bike_id,
                     started_at_secs: conf.timestamp_secs,
                     pre_auth_cents: conf.pre_auth_cents,
-                    station_id: 0, 
+                    station_id: 0,
                 });
 
                 let file_path = format!("rental_state_{}.json", self.user_id);
                 if let Ok(json_content) = serde_json::to_string(&self.current_rental) {
                     if let Err(e) = std::fs::write(&file_path, json_content) {
-                        eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}", e);
+                        eprintln!(
+                            "[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}",
+                            e
+                        );
                     } else {
                         println!("[OFFLINE/ONLINE] Alquiler respaldado en disco de forma segura.");
                     }
@@ -235,8 +247,7 @@ impl AppClient {
                 return;
             }
 
-            MessageType::Prepare => {
-            }
+            MessageType::Prepare => {}
 
             _ => {
                 println!(
@@ -292,7 +303,10 @@ impl AppClient {
                 let file_path = format!("rental_state_{}.json", self.user_id);
                 if let Ok(json_content) = serde_json::to_string(&self.current_rental) {
                     if let Err(e) = std::fs::write(&file_path, json_content) {
-                        eprintln!("[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}", e);
+                        eprintln!(
+                            "[ERROR PERSISTENCIA] No se pudo guardar el archivo de estado: {}",
+                            e
+                        );
                     } else {
                         println!("[OFFLINE/ONLINE] Alquiler respaldado en disco de forma segura.");
                     }
@@ -320,7 +334,10 @@ impl AppClient {
             bike_id: rental.bike_id,
             slot_index,
             started_at_secs: rental.started_at_secs,
-            rental_id: self.actual_rental_id.clone().unwrap_or_else(|| "unknown".into()),
+            rental_id: self
+                .actual_rental_id
+                .clone()
+                .unwrap_or_else(|| "unknown".into()),
         };
 
         match Self::send_tcp_request(addr, &req.serialize()) {
