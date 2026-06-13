@@ -435,6 +435,35 @@ impl CentralServerActor {
 
 impl Actor for CentralServerActor {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        println!("[SERVER] Iniciando recolector de basura de estaciones...");
+        ctx.run_interval(std::time::Duration::from_secs(15), |act, _ctx| {
+            if !act.is_leader {
+                return;
+            }
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            let mut estaciones_muertas = Vec::new();
+            for (id, station) in &act.station_table {
+                if now.saturating_sub(station.updated_at_secs) > 30 {
+                    estaciones_muertas.push(*id);
+                }
+            }
+
+            if !estaciones_muertas.is_empty() {
+                for id in estaciones_muertas {
+                    println!("[SERVER LÍDER] Estación {} eliminada por inactividad.", id);
+                    act.station_table.remove(&id);
+                }
+                act.broadcast_replica_sync(); 
+            }
+        });
+    }
 }
 
 impl Handler<StationUpdateMessage> for CentralServerActor {
