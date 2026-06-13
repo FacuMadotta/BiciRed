@@ -20,25 +20,31 @@ pub struct Transaction {
 pub struct PaymentServiceActor {
     pub transactions: HashMap<String, Transaction>,
     pub cards: HashMap<String, u32>, // Mapa de card_token a saldo disponible en pesos
+    pub csv_path: String,
 }
 
 impl PaymentServiceActor {
-    pub fn new() -> Self {
-        let mut cards = HashMap::new();
-        cards.insert("VISA".to_string(), 100000);
-        cards.insert("MASTERCARD".to_string(), 50000);
-        cards.insert("AMEX".to_string(), 100); // Test tarjeta sin fondos
-
+    pub fn new(cards: HashMap<String, u32>, csv_path: String) -> Self {
         PaymentServiceActor {
             transactions: HashMap::new(),
             cards,
+            csv_path,
         }
+    }
+
+    fn save_cards(&self) {
+        let mut contenido = String::new();
+        for (token, saldo) in &self.cards {
+            contenido.push_str(&format!("{},{}\n", token, saldo));
+        }
+        let _ = std::fs::write(&self.csv_path, contenido);
     }
 
     fn take_money(&mut self, card_token: &str, amount: u32) -> bool {
         if let Some(saldo) = self.cards.get_mut(card_token) {
             if *saldo >= amount {
                 *saldo -= amount;
+                self.save_cards();
                 return true;
             }
         }
@@ -138,6 +144,7 @@ impl Handler<RequestMessage<RollbackPayment, ConnectionActor>> for PaymentServic
                 transaction.status = TransactionStatus::RolledBack;
                 if let Some(saldo) = self.cards.get_mut(&transaction.card_token) {
                     *saldo += transaction.amount_cents; // Reintegrar el monto al saldo de la tarjeta
+                    self.save_cards();
                 }
             }
         }
