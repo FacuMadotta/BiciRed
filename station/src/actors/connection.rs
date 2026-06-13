@@ -1,10 +1,10 @@
-use crate::StationActor;
 use actix::prelude::*;
 use common::*;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-// Actor que maneja la conexión con un cliente, recibiendo solicitudes, y enviando respuestas.
+use crate::actors::StationActor;
+
 pub struct ConnectionActor {
     pub socket: TcpStream,
     pub station_addr: Addr<StationActor>,
@@ -150,23 +150,5 @@ impl Handler<Prepare> for ConnectionActor {
 
     fn handle(&mut self, msg: Prepare, _ctx: &mut Self::Context) {
         self.send_response(msg);
-    }
-}
-
-// Actor que permite levantar un nuevo ConnectionActor por cada nueva conexión entrante, recibiendo los sockets desde el Acceptor.
-pub struct SpawnerActor {
-    pub station_addr: Addr<StationActor>,
-}
-
-impl Actor for SpawnerActor {
-    type Context = Context<Self>;
-}
-
-impl Handler<NewConnectionMessage> for SpawnerActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NewConnectionMessage, _ctx: &mut Self::Context) {
-        println!("Spawner recibiendo socket. Levantando ConnectionActor...");
-        ConnectionActor::new(msg.0, self.station_addr.clone()).start();
     }
 }

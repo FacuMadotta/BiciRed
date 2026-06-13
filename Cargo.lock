@@ -87,6 +87,8 @@ dependencies = [
  "actix",
  "common",
  "futures",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

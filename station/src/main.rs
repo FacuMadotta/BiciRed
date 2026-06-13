@@ -1,10 +1,10 @@
 use actix::prelude::*;
 use std::env;
-mod connection;
-mod station;
+mod actors;
+use actors::{SpawnerActor, StationActor};
+mod domain;
 use common::*;
-use connection::SpawnerActor;
-use station::{Station, StationActor};
+use domain::*;
 
 #[actix::main]
 async fn main() -> std::io::Result<()> {

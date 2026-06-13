@@ -45,7 +45,9 @@ impl AppClient {
     fn load_rental_state(user_id: UserId) -> Option<ActiveRental> {
         let file_path = format!("{}{}.json", FILE_RENTAL, user_id);
         if let Ok(content) = std::fs::read_to_string(&file_path) {
-            println!("[GUARDADO] Encontrado alquiler activo previo en disco. Restaurando estado...");
+            println!(
+                "[GUARDADO] Encontrado alquiler activo previo en disco. Restaurando estado..."
+            );
             serde_json::from_str::<ActiveRental>(&content).ok()
         } else {
             None

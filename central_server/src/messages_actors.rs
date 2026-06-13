@@ -18,13 +18,6 @@ pub struct ValidateUserMessage {
 }
 
 // Connection --> Election
-// #[derive(Message, Debug, Clone)]
-// #[rtype(result = "()")]
-// pub struct LeaderAliveMessage {
-//     pub leader_id: ServerId,
-// }
-
-// Connection --> Election
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct LeaderElectionMessage {

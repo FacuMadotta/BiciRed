@@ -1,14 +1,39 @@
 use actix::prelude::*;
+use common::*;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::actors::ElectorActor;
+use crate::actors::{CentralServerActor, ConnectionActor};
 use crate::messages_actors::*;
 
-const LEADER_TIMEOUT: Duration = Duration::from_secs(5);
 const COORDINATOR_TIMEOUT: Duration = Duration::from_secs(5);
 const TIMEOUT_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
+pub struct ElectorActor {
+    pub server_id: ServerId,
+    pub central_server_addr: Addr<CentralServerActor>,
+    pub is_leader: bool,
+    pub leader_id: Option<ServerId>,
+    pub peer_servers: HashMap<ServerId, Addr<ConnectionActor>>,
+    pub leader_timeout: Instant,
+    pub election_in_progress: bool,
+    pub can_be_leader: bool,
+}
+
 impl ElectorActor {
+    pub fn new(server_id: ServerId, central: Addr<CentralServerActor>) -> Self {
+        Self {
+            server_id,
+            central_server_addr: central,
+            is_leader: false,
+            leader_id: None,
+            peer_servers: HashMap::new(),
+            leader_timeout: Instant::now(),
+            election_in_progress: false,
+            can_be_leader: false,
+        }
+    }
+
     pub fn start_bully_timeout_monitor(&mut self, ctx: &mut Context<Self>) {
         ctx.run_interval(TIMEOUT_CHECK_INTERVAL, |actor, _ctx| {
             if actor.election_in_progress {
@@ -26,7 +51,6 @@ impl ElectorActor {
     }
 
     pub fn reset_leader_timeout(&mut self) {
-        //self.leader_timeout = Instant::now();
         self.election_in_progress = false;
         self.can_be_leader = true;
     }
@@ -56,7 +80,6 @@ impl ElectorActor {
         self.is_leader = true;
         self.leader_id = Some(self.server_id);
         self.election_in_progress = false;
-        //self.leader_timeout = Instant::now();
         self.can_be_leader = true;
         for addr in self.peer_servers.values() {
             addr.do_send(SendCoordinatorMessage {
@@ -70,23 +93,35 @@ impl ElectorActor {
     }
 }
 
-// impl Handler<LeaderAliveMessage> for ElectorActor {
-//     type Result = ();
+impl Actor for ElectorActor {
+    type Context = Context<Self>;
 
-//     fn handle(&mut self, msg: LeaderAliveMessage, _ctx: &mut Self::Context) {
-//         if self.leader_id != Some(msg.leader_id) {
-//             self.is_leader = false;
-//             self.leader_id = Some(msg.leader_id);
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.start_bully_timeout_monitor(ctx);
+        ctx.run_later(std::time::Duration::from_secs(3), |act, _ctx| {
+            if act.leader_id.is_none() {
+                println!("[ELECTION] Arranque de nodo. Iniciando elección inicial...");
+                act.init_election();
+            }
+        });
+    }
+}
 
-//             self.central_server_addr.do_send(RoleUpdateMessage {
-//                 is_leader: self.is_leader,
-//                 leader_id: self.leader_id,
-//             });
-//         }
+impl Handler<RegisterPeerConnectionMessage> for ElectorActor {
+    type Result = ();
 
-//         self.reset_leader_timeout();
-//     }
-// }
+    fn handle(&mut self, msg: RegisterPeerConnectionMessage, _ctx: &mut Self::Context) {
+        self.peer_servers.insert(msg.server_id, msg.connection_addr);
+    }
+}
+
+impl Handler<RemovePeerMessage> for ElectorActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemovePeerMessage, _ctx: &mut Self::Context) {
+        self.peer_servers.remove(&msg.server_id);
+    }
+}
 
 impl Handler<LeaderElectionMessage> for ElectorActor {
     type Result = ();

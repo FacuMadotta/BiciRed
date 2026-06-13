@@ -6,9 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 mod actors;
-mod bully;
 mod messages_actors;
-mod server;
 
 use actors::{CentralServerActor, ElectorActor, SpawnerActor};
 use common::ServerId;
