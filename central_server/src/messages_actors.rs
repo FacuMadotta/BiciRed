@@ -154,3 +154,9 @@ pub struct ReplicaSyncMessage {
     pub station_table: std::collections::HashMap<StationId, StationStatus>,
     pub banned_users: std::collections::HashMap<UserId, String>,
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct UpdateStationTimestamp {
+    pub station_id: StationId,
+}

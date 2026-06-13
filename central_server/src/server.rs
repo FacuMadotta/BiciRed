@@ -73,3 +73,18 @@ impl Handler<RegisterPeerConnectionMessage> for CentralServerActor {
         self.peers.insert(msg.server_id, msg.connection_addr);
     }
 }
+
+impl Handler<UpdateStationTimestamp> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateStationTimestamp, _ctx: &mut Context<Self>) {
+        if let Some(station) = self.station_table.get_mut(&msg.station_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            station.updated_at_secs = now;
+        }
+    }
+}

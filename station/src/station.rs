@@ -884,11 +884,13 @@ impl Actor for StationActor {
         self.try_reconnect_payment(ctx);
 
         ctx.run_interval(std::time::Duration::from_secs(10), |act, ctx| {
-            act.sync_with_central();
             act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();
-            act.sync_with_central();
+            let ping_msg = format!("PING|{}\n", act.station.id);
+            if let Some(ref sender) = act.central_server {
+                let _ = sender.send(ping_msg);
+            }
         });
     }
 }
@@ -1123,7 +1125,7 @@ impl Handler<CentralServerConnected> for StationActor {
     fn handle(&mut self, msg: CentralServerConnected, _ctx: &mut Self::Context) {
         println!("[STATION] Conectado al Central Server. Habilitando comunicación.");
         self.central_server = Some(msg.sender);
-        self.sync_with_central();
+        //self.sync_with_central();
         self.process_batch_updates();
     }
 }

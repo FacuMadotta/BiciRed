@@ -291,6 +291,13 @@ impl Handler<IncomingData> for ConnectionActor {
                             });
                         }
                     }
+                    "PING" => {
+                        if parts.len() == 2 {
+                            if let Ok(id) = parts[1].parse::<StationId>() {
+                                self.server_addr.do_send(UpdateStationTimestamp { station_id: id });
+                            }
+                        }
+                    }
                     _ => {
                         println!(
                             "[SERVER] Tipo de mensaje no manejado en esta fase: {}",
