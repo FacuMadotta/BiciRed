@@ -491,6 +491,19 @@ impl StationActor {
         let location = self.station.location.clone();
         let num_slots = self.station.slots.len();
 
+        let occupieds: Vec<String> = self.station.slots.iter()
+        .filter(|s| matches!(s.state, SlotState::Occupied { .. }))
+        .map(|s| s.index.to_string())
+        .collect();
+
+        let frees: Vec<String> = self.station.slots.iter()
+        .filter(|s| matches!(s.state, SlotState::Empty))
+        .map(|s| s.index.to_string())
+        .collect();
+
+        let occupied_map = occupieds.join(",");
+        let free_map = frees.join(",");
+
         std::thread::spawn(move || {
             let mut server_idx = 0;
             loop {
@@ -506,6 +519,8 @@ impl StationActor {
                             free_slots: num_slots as u8,
                             updated_at_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                             station_addr: my_ip.clone(),
+                            slots_occupied: occupied_map.clone(),
+                            slots_frees: free_map.clone(),
                         };
                         let update_msg = StationUpdate { station: status };
                         let payload = format!("{}\n", update_msg.serialize());
