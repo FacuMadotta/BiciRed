@@ -70,7 +70,6 @@ impl Actor for ConnectionActor {
     }
 }
 
-
 impl Handler<IncomingData> for ConnectionActor {
     type Result = ();
 
@@ -81,11 +80,21 @@ impl Handler<IncomingData> for ConnectionActor {
 
         let message_text = text.trim();
         match MessageType::deserialize(message_text) {
-            MessageType::PreparePayment => self.dispatch_to_service::<PreparePayment>(message_text, ctx),
-            MessageType::CommitPayment => self.dispatch_to_service::<CommitPayment>(message_text, ctx),
-            MessageType::CapturePayment => self.dispatch_to_service::<CapturePayment>(message_text, ctx),
-            MessageType::RollbackPayment => self.dispatch_to_service::<RollbackPayment>(message_text, ctx),
-            MessageType::ReservePayment => self.dispatch_to_service::<ReservePayment>(message_text, ctx),
+            MessageType::PreparePayment => {
+                self.dispatch_to_service::<PreparePayment>(message_text, ctx)
+            }
+            MessageType::CommitPayment => {
+                self.dispatch_to_service::<CommitPayment>(message_text, ctx)
+            }
+            MessageType::CapturePayment => {
+                self.dispatch_to_service::<CapturePayment>(message_text, ctx)
+            }
+            MessageType::RollbackPayment => {
+                self.dispatch_to_service::<RollbackPayment>(message_text, ctx)
+            }
+            MessageType::ReservePayment => {
+                self.dispatch_to_service::<ReservePayment>(message_text, ctx)
+            }
             _ => println!("[BANK] Mensaje desconocido recibido: {}", message_text),
         }
     }
@@ -100,12 +109,14 @@ impl Handler<ConnectionClosed> for ConnectionActor {
     }
 }
 
-
 impl Handler<VoteCommit> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: VoteCommit, _ctx: &mut Self::Context) {
-        println!("[BANK] Enviando VoteCommit para transaction_id {}", msg.transaction_id());
+        println!(
+            "[BANK] Enviando VoteCommit para transaction_id {}",
+            msg.transaction_id()
+        );
         self.write_response(msg);
     }
 }
@@ -114,7 +125,10 @@ impl Handler<VoteAbort> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: VoteAbort, _ctx: &mut Self::Context) {
-        println!("[BANK] Enviando VoteAbort para transaction_id {}", msg.transaction_id());
+        println!(
+            "[BANK] Enviando VoteAbort para transaction_id {}",
+            msg.transaction_id()
+        );
         self.write_response(msg);
     }
 }

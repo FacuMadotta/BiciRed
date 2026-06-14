@@ -9,7 +9,6 @@ use std::time::Instant;
 use models::{Transaction, TransactionStatus};
 use persistence::{load_transactions, save_cards};
 
-
 pub struct PaymentServiceActor {
     pub(crate) transactions: HashMap<String, Transaction>,
     pub(crate) cards: HashMap<String, u32>,

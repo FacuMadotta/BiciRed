@@ -4,6 +4,8 @@ use std::io::{self, Write};
 
 mod client;
 mod models;
+#[cfg(test)]
+mod test_app;
 use client::AppClient;
 
 fn read_input(prompt: &str) -> String {

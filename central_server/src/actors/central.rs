@@ -220,9 +220,11 @@ impl Handler<RoleUpdateMessage> for CentralServerActor {
         );
         self.is_leader = msg.is_leader;
         self.leader_id = msg.leader_id;
-        
+
         if self.is_leader {
-            println!("[SERVER LÍDER] ¡Liderazgo asumido por elección! Sincronizando clúster completo...");
+            println!(
+                "[SERVER LÍDER] ¡Liderazgo asumido por elección! Sincronizando clúster completo..."
+            );
             self.broadcast_replica_sync();
         }
     }
@@ -267,7 +269,10 @@ impl Handler<PeerConnectedMessage> for CentralServerActor {
         self.peers.insert(msg.peer_id, connection_addr.clone());
 
         if self.is_leader {
-            println!("[SERVER LÍDER] Conexión saliente establecida con {}. Sincronizando estado...", msg.peer_id);
+            println!(
+                "[SERVER LÍDER] Conexión saliente establecida con {}. Sincronizando estado...",
+                msg.peer_id
+            );
             self.broadcast_replica_sync();
         }
 
@@ -316,7 +321,10 @@ impl Handler<RegisterPeerConnectionMessage> for CentralServerActor {
         );
         self.peers.insert(msg.server_id, msg.connection_addr);
         if self.is_leader {
-            println!("[SERVER LÍDER] ¡Peer {} conectado! Enviando sincronización de bienvenida...", msg.server_id);
+            println!(
+                "[SERVER LÍDER] ¡Peer {} conectado! Enviando sincronización de bienvenida...",
+                msg.server_id
+            );
             self.broadcast_replica_sync();
         }
     }

@@ -8,9 +8,10 @@ use common::*;
 
 use crate::domain::SlotState;
 
-use super::messages::{CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected};
+use super::messages::{
+    CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected,
+};
 use super::StationActor;
-
 
 impl StationActor {
     pub fn send_to_payment(&mut self, msg: String) -> Result<(), ()> {
@@ -118,7 +119,10 @@ impl StationActor {
                                     || e.kind() == std::io::ErrorKind::TimedOut =>
                             {
                                 // Timeout de lectura: el servidor es el líder y no respondió nada extra
-                                println!("[RECONEXIÓN CENTRAL] ¡Líder encontrado en {}!", target_ip);
+                                println!(
+                                    "[RECONEXIÓN CENTRAL] ¡Líder encontrado en {}!",
+                                    target_ip
+                                );
                             }
                             _ => {
                                 // Error de conexión o cierre prematuro

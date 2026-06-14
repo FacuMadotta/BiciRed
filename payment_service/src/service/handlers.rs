@@ -8,7 +8,6 @@ use super::models::{Transaction, TransactionStatus};
 use super::persistence::{save_cards, save_transaction};
 use super::PaymentServiceActor;
 
-
 impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
@@ -52,7 +51,6 @@ impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentService
     }
 }
 
-
 impl Handler<RequestMessage<CommitPayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
 
@@ -72,7 +70,6 @@ impl Handler<RequestMessage<CommitPayment, ConnectionActor>> for PaymentServiceA
         save_transaction(&self.transactions, tx_id, &TransactionStatus::Committed);
     }
 }
-
 
 impl Handler<RequestMessage<RollbackPayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
@@ -97,7 +94,6 @@ impl Handler<RequestMessage<RollbackPayment, ConnectionActor>> for PaymentServic
         save_transaction(&self.transactions, tx_id, &TransactionStatus::RolledBack);
     }
 }
-
 
 impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();
@@ -141,7 +137,6 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
         }
     }
 }
-
 
 impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentServiceActor {
     type Result = ();

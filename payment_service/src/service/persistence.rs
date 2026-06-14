@@ -22,9 +22,7 @@ pub fn save_transaction(
         TransactionStatus::RolledBack => 3,
     };
 
-    let elapsed_secs = Instant::now()
-        .duration_since(tx.timestamp)
-        .as_secs();
+    let elapsed_secs = Instant::now().duration_since(tx.timestamp).as_secs();
 
     let line = format!(
         "transaction_id:{},card_token:{},amount_cents:{},status_code:{},elapsed_secs:{}\n",
@@ -69,20 +67,36 @@ pub fn load_transactions() -> HashMap<String, Transaction> {
             continue;
         }
 
-        let Some(tx_id_part) = parts[0].split(':').nth(1) else { continue; };
+        let Some(tx_id_part) = parts[0].split(':').nth(1) else {
+            continue;
+        };
         let transaction_id = tx_id_part.trim().to_string();
 
-        let Some(card_token_part) = parts[1].split(':').nth(1) else { continue; };
+        let Some(card_token_part) = parts[1].split(':').nth(1) else {
+            continue;
+        };
         let card_token = card_token_part.trim().to_string();
 
-        let Some(amount_part) = parts[2].split(':').nth(1) else { continue; };
-        let Ok(amount_cents) = amount_part.trim().parse::<u32>() else { continue; };
+        let Some(amount_part) = parts[2].split(':').nth(1) else {
+            continue;
+        };
+        let Ok(amount_cents) = amount_part.trim().parse::<u32>() else {
+            continue;
+        };
 
-        let Some(status_part) = parts[3].split(':').nth(1) else { continue; };
-        let Ok(status_code) = status_part.trim().parse::<u8>() else { continue; };
+        let Some(status_part) = parts[3].split(':').nth(1) else {
+            continue;
+        };
+        let Ok(status_code) = status_part.trim().parse::<u8>() else {
+            continue;
+        };
 
-        let Some(elapsed_part) = parts[4].split(':').nth(1) else { continue; };
-        let Ok(elapsed_secs) = elapsed_part.trim().parse::<u64>() else { continue; };
+        let Some(elapsed_part) = parts[4].split(':').nth(1) else {
+            continue;
+        };
+        let Ok(elapsed_secs) = elapsed_part.trim().parse::<u64>() else {
+            continue;
+        };
 
         let timestamp = Instant::now() - std::time::Duration::from_secs(elapsed_secs);
 

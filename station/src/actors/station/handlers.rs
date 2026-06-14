@@ -5,13 +5,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::actors::ConnectionActor;
 use crate::domain::*;
 
-use super::messages::{CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected};
+use super::messages::{
+    CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected,
+};
 use super::persistence::{
     flush_pending_file, get_charges_filename, get_rents_filename, parse_charge_record,
     parse_rent_record, save_pending_charge, save_pending_rent,
 };
 use super::{PendingCharge, PendingValidation, StationActor, TransactionState};
-
 
 impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
     type Result = ();
@@ -52,7 +53,6 @@ impl Handler<RequestMessage<RentRequest, ConnectionActor>> for StationActor {
     }
 }
 
-
 impl Handler<UserValidationResult> for StationActor {
     type Result = ();
 
@@ -73,7 +73,6 @@ impl Handler<UserValidationResult> for StationActor {
         }
     }
 }
-
 
 impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
     type Result = ();
@@ -124,7 +123,6 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
     }
 }
 
-
 impl Handler<PaymentResult> for StationActor {
     type Result = ();
 
@@ -149,7 +147,6 @@ impl Handler<PaymentResult> for StationActor {
         }
     }
 }
-
 
 impl Handler<RequestMessage<VoteCommit, ConnectionActor>> for StationActor {
     type Result = ();
@@ -181,13 +178,15 @@ impl Handler<RequestMessage<VoteAbort, ConnectionActor>> for StationActor {
             .serialize(),
         );
 
-        if let Some(tx) = self.pending_transactions.remove(&msg.request.transaction_id) {
+        if let Some(tx) = self
+            .pending_transactions
+            .remove(&msg.request.transaction_id)
+        {
             self.station.cancel_reservation(tx.slot_index, tx.bike_id);
             self.station.save_inventory();
         }
     }
 }
-
 
 impl Handler<VoteCommit> for StationActor {
     type Result = ();
@@ -214,7 +213,6 @@ impl Handler<VoteAbort> for StationActor {
     }
 }
 
-
 impl Handler<ReservationRejected> for StationActor {
     type Result = ();
 
@@ -232,7 +230,6 @@ impl Handler<ReservationRejected> for StationActor {
         }
     }
 }
-
 
 impl Handler<CentralServerConnected> for StationActor {
     type Result = ();
@@ -258,7 +255,6 @@ impl Handler<PaymentServiceDisconnected> for StationActor {
         self.payment_service = None;
     }
 }
-
 
 impl StationActor {
     pub fn check_transaction_state(&mut self, transaction_id: &str) {
@@ -355,13 +351,18 @@ impl StationActor {
 
                 self.active_rentals.insert(
                     msg.request.user_id,
-                    time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                    time.duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
                 );
 
                 msg.response.do_send(RentConfirmed {
                     bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
-                    timestamp_secs: time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                    timestamp_secs: time
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
                     rental_id,
                 });
             }
@@ -384,7 +385,10 @@ impl StationActor {
 
         msg.response.do_send(ReturnConfirmed {
             charged_cents: amount_cents,
-            timestamp_secs: time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            timestamp_secs: time
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         });
 
         self.sync_with_central();

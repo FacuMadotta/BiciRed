@@ -54,7 +54,7 @@ impl AppClient {
         }
     }
 
-    fn save_rental_state(&self) {
+    pub fn save_rental_state(&self) {
         let file_path = format!("{}{}.json", FILE_RENTAL, self.user_id);
         if let Ok(json_content) = serde_json::to_string(&self.current_rental) {
             if let Err(e) = std::fs::write(&file_path, json_content) {
@@ -65,7 +65,7 @@ impl AppClient {
         }
     }
 
-    fn clear_rental_state(&self) {
+    pub fn clear_rental_state(&self) {
         let file_path = format!("{}{}.json", FILE_RENTAL, self.user_id);
         let _ = std::fs::remove_file(file_path);
         println!("[GUARDADO] Historial de alquiler limpiado del disco.");
@@ -147,7 +147,7 @@ impl AppClient {
         }
     }
 
-    fn handle_central_response(&mut self, text: &str) -> bool {
+    pub fn handle_central_response(&mut self, text: &str) -> bool {
         let msg_type = MessageType::deserialize(text);
 
         match msg_type {
