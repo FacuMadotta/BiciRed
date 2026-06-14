@@ -141,6 +141,18 @@ impl Handler<ReservationRejected> for ConnectionActor {
     }
 }
 
+impl Handler<PaymentResult> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PaymentResult, _ctx: &mut Self::Context) {
+        println!(
+            "[BANK] Enviando PaymentResult para transaction_id {}: success={}",
+            msg.transaction_id, msg.success
+        );
+        self.send_response(msg);
+    }
+}
+
 impl Handler<ConnectionClosed> for ConnectionActor {
     type Result = ();
 

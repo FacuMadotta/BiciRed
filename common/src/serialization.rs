@@ -207,6 +207,18 @@ impl Serializable for CapturePayment {
     }
 }
 
+impl Serializable for PaymentResult {
+    fn serialize(&self) -> String {
+        format!(
+            "{}|{}|{}|{}",
+            MessageType::PaymentResult.as_str(),
+            self.transaction_id,
+            self.success,
+            self.amount_cents
+        )
+    }
+}
+
 impl<T: TransactionMessage> Serializable for T {
     fn serialize(&self) -> String {
         format!("{}|{}", T::message_type().as_str(), self.transaction_id())

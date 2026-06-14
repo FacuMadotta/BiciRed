@@ -211,6 +211,11 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
                     transaction.status.clone(),
                 )
             } else {
+                msg.response.do_send(PaymentResult {
+                    transaction_id: msg.request.transaction_id.clone(),
+                    success: false,
+                    amount_cents: msg.request.amount_cents,
+                });
                 return;
             };
 
@@ -218,6 +223,11 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
             if let Some(transaction) = self.transactions.get_mut(&msg.request.transaction_id) {
                 transaction.status = TransactionStatus::Captured;
             }
+            msg.response.do_send(PaymentResult {
+                transaction_id: msg.request.transaction_id.clone(),
+                success: true,
+                amount_cents: msg.request.amount_cents,
+            });
             return;
         }
 
@@ -245,7 +255,7 @@ impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentService
             Transaction {
                 card_token: msg.request.card_token.clone(),
                 amount_cents: msg.request.amount_cents,
-                status: TransactionStatus::Captured,
+                status: TransactionStatus::Commited, 
                 timestamp: Instant::now(),
             },
         );

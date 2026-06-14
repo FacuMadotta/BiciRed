@@ -255,6 +255,7 @@ impl AppClient {
         match msg_type {
             MessageType::RentConfirmed => {
                 let conf = RentConfirmed::deserialize(&prepare_text);
+                self.actual_rental_id = Some(conf.rental_id.clone());
                 println!(
                     "\n[ÉXITO PAYMENT OFFLINE] Bici {} liberada. Pre-auth: ${}",
                     conf.bike_id, conf.pre_auth_cents

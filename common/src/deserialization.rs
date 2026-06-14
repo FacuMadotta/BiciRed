@@ -258,6 +258,23 @@ impl Deserializable for CapturePayment {
     }
 }
 
+impl Deserializable for PaymentResult {
+    fn deserialize(input: &str) -> Self {
+        let parts: Vec<&str> = input.split('|').collect();
+        assert!(parts.len() == 4);
+        let success = match parts[2] {
+            "true" => true,
+            "false" => false,
+            _ => parts[2].parse().expect("Invalid success value"),
+        };
+        Self {
+            transaction_id: parts[1].parse().expect("Invalid transaction_id"),
+            success,
+            amount_cents: parts[3].parse().expect("Invalid amount_cents"),
+        }
+    }
+}
+
 impl Deserializable for UserBanned {
     fn deserialize(input: &str) -> Self {
         let parts: Vec<&str> = input.split('|').collect();

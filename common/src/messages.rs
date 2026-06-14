@@ -171,6 +171,14 @@ pub struct CapturePayment {
 
 #[derive(Message)]
 #[rtype(result = "()")]
+pub struct PaymentResult {
+    pub transaction_id: String,
+    pub success: bool,
+    pub amount_cents: u32,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct RollbackPayment {
     pub transaction_id: String,
 }

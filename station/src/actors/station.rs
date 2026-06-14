@@ -25,6 +25,11 @@ pub struct PendingValidation {
     pub started_at: SystemTime,
 }
 
+pub struct PendingCharge {
+    pub msg: RequestMessage<ReturnRequest, ConnectionActor>,
+    pub started_at: SystemTime,
+}
+
 pub struct StationActor {
     station: Station,
     central_server: Option<Sender<String>>,
@@ -34,6 +39,7 @@ pub struct StationActor {
     my_ip: String,
     payment_ip: String,
     pending_validations: HashMap<UserId, PendingValidation>,
+    pending_charges: HashMap<UserId, PendingCharge>, 
     active_rentals: HashMap<common::UserId, u64>,
 }
 
@@ -53,6 +59,7 @@ impl StationActor {
             my_ip,
             payment_ip,
             pending_validations: HashMap::new(),
+            pending_charges: HashMap::new(),
             active_rentals: HashMap::new(),
         }
     }
@@ -583,12 +590,16 @@ impl StationActor {
                                     MessageType::ReservationRejected => {
                                         station_addr.do_send(ReservationRejected::deserialize(line))
                                     }
+                                    MessageType::PaymentResult => {
+                                        station_addr.do_send(PaymentResult::deserialize(line))
+                                    }
                                     _ => {}
                                 }
                             }
                         }
                     }
                 }
+                station_addr.do_send(PaymentServiceDisconnected);
             });
             self.payment_service = Some(tx);
         }
@@ -644,10 +655,30 @@ impl StationActor {
                     bike_id,
                     pre_auth_cents: PRE_AUTH_AMOUNT_CENTS,
                     timestamp_secs: time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                    rental_id,
+                    rental_id: rental_id.clone(),
                 });
             }
         }
+    }
+
+    fn process_return_request(
+        &mut self,
+        msg: RequestMessage<ReturnRequest, ConnectionActor>,
+        amount_cents: u32,
+        time: SystemTime,
+    ) {
+        self.station
+            .return_bike(msg.request.slot_index, msg.request.bike_id);
+        self.station.save_inventory();
+        if let Some(user_id) = self.client_id_from_rental(&msg.request.rental_id) {
+            self.active_rentals.remove(&user_id);
+        }
+
+        msg.response.do_send(ReturnConfirmed {
+                charged_cents: amount_cents,
+                timestamp_secs: time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            });
+        self.sync_with_central();
     }
 
     fn check_unreturned_bikes(&mut self) {
@@ -684,7 +715,7 @@ impl Actor for StationActor {
         self.start_central_connection(ctx);
         self.try_reconnect_payment(ctx);
 
-        ctx.run_interval(std::time::Duration::from_secs(10), |act, ctx| {
+        ctx.run_interval(std::time::Duration::from_secs(5), |act, ctx| {
             act.try_reconnect_payment(ctx);
             act.process_batch_updates();
             act.abort_expired_transactions();
@@ -754,12 +785,6 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
         _ctx: &mut Self::Context,
     ) {
         if self.station.is_slot_free(msg.request.slot_index) {
-            self.station
-                .return_bike(msg.request.slot_index, msg.request.bike_id);
-            self.station.save_inventory();
-            if let Some(user_id) = self.client_id_from_rental(&msg.request.rental_id) {
-                self.active_rentals.remove(&user_id);
-            }
             let amount_cents = self.station.calculate_amount(
                 msg.request.started_at_secs,
                 SystemTime::now()
@@ -774,19 +799,20 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
                         amount_cents,
                     }
                     .serialize(),
-                )
-                .is_err()
+                ) 
+                .is_ok()
             {
+                self.pending_charges.insert(
+                        msg.request.user_id,
+                        PendingCharge {
+                            msg,
+                            started_at: SystemTime::now(),
+                        },
+                    );
+            } else {
                 self.save_pending_charge(&msg.request.rental_id, amount_cents, msg.request.bike_id);
+                self.process_return_request(msg, amount_cents, SystemTime::now());
             }
-            msg.response.do_send(ReturnConfirmed {
-                charged_cents: amount_cents,
-                timestamp_secs: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            });
-            self.sync_with_central();
         } else {
             msg.response.do_send(ReturnRejected {
                 reason: "Slot ocupado".to_string(),
@@ -794,6 +820,24 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
         }
     }
 }
+
+impl Handler<PaymentResult> for StationActor {
+    type Result = ();
+    fn handle(&mut self, msg: PaymentResult, _ctx: &mut Self::Context) {
+        let charge = self.pending_charges.remove(&self.client_id_from_rental(&msg.transaction_id).unwrap_or_default());
+         
+        if let Some(pending_charge) = charge {
+            if msg.success {
+                self.process_return_request(pending_charge.msg, msg.amount_cents, pending_charge.started_at);
+            } else {
+                pending_charge.msg.response.do_send(ReturnRejected {
+                    reason: "Pago fallido".to_string(),
+                });
+            }
+        } 
+    }
+}
+
 impl Handler<RequestMessage<VoteCommit, ConnectionActor>> for StationActor {
     type Result = ();
     fn handle(
@@ -889,3 +933,14 @@ impl Handler<CentralServerDisconnected> for StationActor {
         self.central_server = None;
     }
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PaymentServiceDisconnected;
+impl Handler<PaymentServiceDisconnected> for StationActor {
+    type Result = ();
+    fn handle(&mut self, _msg: PaymentServiceDisconnected, _ctx: &mut Self::Context) {
+        self.payment_service = None;
+    }
+}
+
