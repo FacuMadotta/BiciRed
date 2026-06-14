@@ -1,10 +1,10 @@
-use crate::PaymentServiceActor;
 use actix::prelude::*;
 use common::*;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-// Actor de conexión TCP
+use crate::service::PaymentServiceActor;
+
 pub struct ConnectionActor {
     pub socket: TcpStream,
     pub payment_service_addr: Addr<PaymentServiceActor>,
@@ -18,24 +18,20 @@ impl ConnectionActor {
         }
     }
 
-    fn send_message<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context)
+    fn dispatch_to_service<T>(&mut self, message_text: &str, ctx: &mut <Self as Actor>::Context)
     where
         T: Deserializable + 'static + Send,
         PaymentServiceActor: Handler<RequestMessage<T, ConnectionActor>>,
     {
-        let request_data = T::deserialize(message_text);
         self.payment_service_addr.do_send(RequestMessage {
-            request: request_data,
+            request: T::deserialize(message_text),
             response: ctx.address(),
         });
     }
 
-    fn send_response<T>(&mut self, response: T)
-    where
-        T: Serializable,
-    {
-        let response_text = response.serialize();
-        let _ = self.socket.write_all(response_text.as_bytes());
+    /// Serializa una respuesta y la escribe directamente en el socket TCP.
+    fn write_response<T: Serializable>(&mut self, response: T) {
+        let _ = self.socket.write_all(response.serialize().as_bytes());
     }
 }
 
@@ -75,81 +71,24 @@ impl Actor for ConnectionActor {
     }
 }
 
+
 impl Handler<IncomingData> for ConnectionActor {
     type Result = ();
 
     fn handle(&mut self, msg: IncomingData, ctx: &mut Self::Context) {
-        if let Ok(text) = String::from_utf8(msg.0) {
-            let message_text = text.trim();
-            let message_type = MessageType::deserialize(message_text);
+        let Ok(text) = String::from_utf8(msg.0) else {
+            return;
+        };
 
-            match message_type {
-                MessageType::PreparePayment => {
-                    self.send_message::<PreparePayment>(message_text, ctx)
-                }
-                MessageType::CommitPayment => self.send_message::<CommitPayment>(message_text, ctx),
-                MessageType::CapturePayment => {
-                    self.send_message::<CapturePayment>(message_text, ctx)
-                }
-                MessageType::RollbackPayment => {
-                    self.send_message::<RollbackPayment>(message_text, ctx)
-                }
-                MessageType::ReservePayment => {
-                    self.send_message::<ReservePayment>(message_text, ctx)
-                }
-                _ => {
-                    println!("Mensaje desconocido recibido: {}", message_text);
-                }
-            }
+        let message_text = text.trim();
+        match MessageType::deserialize(message_text) {
+            MessageType::PreparePayment => self.dispatch_to_service::<PreparePayment>(message_text, ctx),
+            MessageType::CommitPayment => self.dispatch_to_service::<CommitPayment>(message_text, ctx),
+            MessageType::CapturePayment => self.dispatch_to_service::<CapturePayment>(message_text, ctx),
+            MessageType::RollbackPayment => self.dispatch_to_service::<RollbackPayment>(message_text, ctx),
+            MessageType::ReservePayment => self.dispatch_to_service::<ReservePayment>(message_text, ctx),
+            _ => println!("[BANK] Mensaje desconocido recibido: {}", message_text),
         }
-    }
-}
-
-impl Handler<VoteCommit> for ConnectionActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: VoteCommit, _ctx: &mut Self::Context) {
-        println!(
-            "[BANK] Enviando VoteCommit para transaction_id {}",
-            msg.transaction_id()
-        );
-        self.send_response(msg);
-    }
-}
-
-impl Handler<VoteAbort> for ConnectionActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: VoteAbort, _ctx: &mut Self::Context) {
-        println!(
-            "[BANK] Enviando VoteAbort para transaction_id {}",
-            msg.transaction_id()
-        );
-        self.send_response(msg);
-    }
-}
-
-impl Handler<ReservationRejected> for ConnectionActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
-        println!(
-            "[BANK] Enviando ReservationRejected para transaction_id {}: {}",
-            msg.transaction_id, msg.reason
-        );
-        self.send_response(msg);
-    }
-}
-
-impl Handler<PaymentResult> for ConnectionActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: PaymentResult, _ctx: &mut Self::Context) {
-        println!(
-            "[BANK] Enviando PaymentResult para transaction_id {}: success={}",
-            msg.transaction_id, msg.success
-        );
-        self.send_response(msg);
     }
 }
 
@@ -162,20 +101,45 @@ impl Handler<ConnectionClosed> for ConnectionActor {
     }
 }
 
-// Actor Spawner para aceptar conexiones
-pub struct SpawnerActor {
-    pub payment_service_addr: Addr<PaymentServiceActor>,
-}
 
-impl Actor for SpawnerActor {
-    type Context = Context<Self>;
-}
-
-impl Handler<NewConnectionMessage> for SpawnerActor {
+impl Handler<VoteCommit> for ConnectionActor {
     type Result = ();
 
-    fn handle(&mut self, msg: NewConnectionMessage, _ctx: &mut Self::Context) {
-        println!("[BANK] Spawner recibiendo socket. Levantando ConnectionActor...");
-        ConnectionActor::new(msg.0, self.payment_service_addr.clone()).start();
+    fn handle(&mut self, msg: VoteCommit, _ctx: &mut Self::Context) {
+        println!("[BANK] Enviando VoteCommit para transaction_id {}", msg.transaction_id());
+        self.write_response(msg);
+    }
+}
+
+impl Handler<VoteAbort> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: VoteAbort, _ctx: &mut Self::Context) {
+        println!("[BANK] Enviando VoteAbort para transaction_id {}", msg.transaction_id());
+        self.write_response(msg);
+    }
+}
+
+impl Handler<ReservationRejected> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReservationRejected, _ctx: &mut Self::Context) {
+        println!(
+            "[BANK] Enviando ReservationRejected para transaction_id {}: {}",
+            msg.transaction_id, msg.reason
+        );
+        self.write_response(msg);
+    }
+}
+
+impl Handler<PaymentResult> for ConnectionActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PaymentResult, _ctx: &mut Self::Context) {
+        println!(
+            "[BANK] Enviando PaymentResult para transaction_id {}: success={}",
+            msg.transaction_id, msg.success
+        );
+        self.write_response(msg);
     }
 }

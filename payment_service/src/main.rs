@@ -2,10 +2,11 @@ use actix::prelude::*;
 use common::{Acceptor, NewConnectionMessage};
 use std::collections::HashMap;
 use std::env;
-use std::fs;
-mod connection;
+
+mod actors;
 mod service;
-use connection::SpawnerActor;
+
+use actors::SpawnerActor;
 use service::PaymentServiceActor;
 
 #[actix::main]
@@ -18,9 +19,10 @@ async fn main() -> std::io::Result<()> {
 
     let ip = args[1].clone();
     let tarjetas_csv = args[2].clone();
+
     println!("[BANK] Iniciando PaymentService en {}", ip);
 
-    let tarjetas_db = cargar_tarjetas(&tarjetas_csv);
+    let tarjetas_db = load_cards_from_csv(&tarjetas_csv);
     println!(
         "[BANK] Base de datos cargada. Tarjetas registradas: {}",
         tarjetas_db.len()
@@ -44,16 +46,17 @@ async fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn cargar_tarjetas(ruta: &str) -> HashMap<String, u32> {
+fn load_cards_from_csv(path: &str) -> HashMap<String, u32> {
     let mut db = HashMap::new();
-    if let Ok(contenido) = fs::read_to_string(ruta) {
-        for linea in contenido.lines() {
-            let partes: Vec<&str> = linea.split(',').collect();
-            if partes.len() == 2 {
-                let token = partes[0].to_string();
-                if let Ok(saldo) = partes[1].trim().parse::<u32>() {
-                    db.insert(token, saldo);
-                }
+    let Ok(content) = std::fs::read_to_string(path) else {
+        eprintln!("[BANK] No se pudo leer el archivo de tarjetas: {}", path);
+        return db;
+    };
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split(',').collect();
+        if let [token, balance] = parts.as_slice() {
+            if let Ok(saldo) = balance.trim().parse::<u32>() {
+                db.insert(token.to_string(), saldo);
             }
         }
     }
