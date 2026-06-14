@@ -29,7 +29,6 @@ impl ConnectionActor {
         });
     }
 
-    /// Serializa una respuesta y la escribe directamente en el socket TCP.
     fn write_response<T: Serializable>(&mut self, response: T) {
         let _ = self.socket.write_all(response.serialize().as_bytes());
     }
