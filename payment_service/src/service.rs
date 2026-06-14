@@ -3,6 +3,9 @@ use crate::HashMap;
 use actix::prelude::*;
 use common::*;
 use std::time::Instant;
+use std::io::Write;
+
+const TRANSACTION_FILE: &str = "payment_transactions.csv";
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum TransactionStatus {
@@ -28,7 +31,7 @@ pub struct PaymentServiceActor {
 impl PaymentServiceActor {
     pub fn new(cards: HashMap<String, u32>, csv_path: String) -> Self {
         PaymentServiceActor {
-            transactions: HashMap::new(),
+            transactions: Self::load_transactions(),
             cards,
             csv_path,
         }
@@ -81,6 +84,70 @@ impl PaymentServiceActor {
         if changes {
             self.save_cards();
         }
+    }
+
+    fn save_transaction(&self, transaction_id: &str, status: &TransactionStatus) {
+        let mut contenido = String::new();
+        contenido.push_str(&format!(
+            "{},{},{},{},{}\n",
+            transaction_id,
+            self.transactions[transaction_id].card_token,
+            self.transactions[transaction_id].amount_cents,
+            match status {
+                TransactionStatus::PreAuthorized => 0,
+                TransactionStatus::Commited => 1,
+                TransactionStatus::Captured => 2,
+                TransactionStatus::RolledBack => 3,
+            },
+            Instant::now()
+                .duration_since(self.transactions[transaction_id].timestamp)
+                .as_secs()
+        ));
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(TRANSACTION_FILE)
+            .expect("No se pudo abrir el archivo de transacciones");
+
+        file.write_all(contenido.as_bytes())
+            .expect("No se pudo escribir en el archivo de transacciones");
+    }
+
+    fn load_transactions() -> HashMap<String, Transaction> {
+        let mut transactions = HashMap::new();
+        if let Ok(contenido) = std::fs::read_to_string(TRANSACTION_FILE) {
+            for linea in contenido.lines() {
+                let partes: Vec<&str> = linea.split(',').collect();
+                if partes.len() == 5 {
+                    let id = partes[0].to_string();
+                    let card_token = partes[1].to_string();
+                    if let Ok(amount_cents) = partes[2].parse::<u32>() {
+                        if let Ok(status_num) = partes[3].parse::<u8>() {
+                            if let Ok(elapsed_secs) = partes[4].parse::<u64>() {
+                                let status = match status_num {
+                                    0 => TransactionStatus::PreAuthorized,
+                                    1 => TransactionStatus::Commited,
+                                    2 => TransactionStatus::Captured,
+                                    3 => TransactionStatus::RolledBack,
+                                    _ => continue,
+                                };
+                                transactions.insert(
+                                    id.clone(),
+                                    Transaction {
+                                        card_token,
+                                        amount_cents,
+                                        status,
+                                        timestamp: Instant::now() - std::time::Duration::from_secs(elapsed_secs),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        transactions
     }
 }
 
@@ -138,6 +205,9 @@ impl Handler<RequestMessage<PreparePayment, ConnectionActor>> for PaymentService
                     timestamp: Instant::now(),
                 },
             );
+
+            self.save_transaction(&msg.request.transaction_id, &TransactionStatus::PreAuthorized);
+
             msg.response
                 .do_send(VoteCommit::new(msg.request.transaction_id));
             return;
@@ -164,6 +234,7 @@ impl Handler<RequestMessage<CommitPayment, ConnectionActor>> for PaymentServiceA
                 transaction.status = TransactionStatus::Commited;
             }
         }
+        self.save_transaction(&msg.request.transaction_id, &TransactionStatus::Commited);
     }
 }
 
@@ -188,6 +259,7 @@ impl Handler<RequestMessage<RollbackPayment, ConnectionActor>> for PaymentServic
                 }
             }
         }
+        self.save_transaction(&msg.request.transaction_id, &TransactionStatus::RolledBack);
     }
 }
 
@@ -228,6 +300,9 @@ impl Handler<RequestMessage<CapturePayment, ConnectionActor>> for PaymentService
                 success: true,
                 amount_cents: msg.request.amount_cents,
             });
+
+            self.save_transaction(&msg.request.transaction_id, &TransactionStatus::Captured);
+
             return;
         }
 
@@ -259,6 +334,9 @@ impl Handler<RequestMessage<ReservePayment, ConnectionActor>> for PaymentService
                 timestamp: Instant::now(),
             },
         );
+
+        self.save_transaction(&msg.request.transaction_id, &TransactionStatus::Commited);
+
         if !self.take_money(&msg.request.card_token, msg.request.amount_cents) {
             msg.response.do_send(ReservationRejected {
                 transaction_id: msg.request.transaction_id.clone(),
