@@ -5,6 +5,8 @@ use std::env;
 
 mod actors;
 mod service;
+#[cfg(test)]
+mod test_payment;
 
 use actors::SpawnerActor;
 use service::PaymentServiceActor;

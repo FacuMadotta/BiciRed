@@ -35,7 +35,7 @@ impl PaymentServiceActor {
         false
     }
 
-    fn cleanup_stuck_transactions(&mut self) {
+    pub(crate) fn cleanup_stuck_transactions(&mut self) {
         let now = Instant::now();
         let mut refunds_applied = false;
 

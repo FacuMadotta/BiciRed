@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 common = { path = "../common" }
 actix = "0.13"
+
+[dev-dependencies]
+actix-rt = "2.11.0"
