@@ -143,7 +143,7 @@ impl Handler<LeaderAnnouncementMessage> for ElectorActor {
     type Result = ();
 
     fn handle(&mut self, msg: LeaderAnnouncementMessage, _ctx: &mut Self::Context) {
-        self.is_leader = false;
+        self.is_leader = msg.leader_id == self.server_id;
         self.leader_id = Some(msg.leader_id);
         self.reset_leader_timeout();
 

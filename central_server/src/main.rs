@@ -7,6 +7,8 @@ use std::time::Duration;
 
 mod actors;
 mod messages_actors;
+#[cfg(test)]
+mod test_central;
 
 use actors::{CentralServerActor, ElectorActor, SpawnerActor};
 use common::ServerId;
