@@ -395,8 +395,8 @@ impl StationActor {
     }
 
     pub fn process_batch_updates(&mut self) {
-        self.process_pending_charges();
         self.process_pending_rents();
+        self.process_pending_charges();
     }
 
     fn process_pending_rents(&mut self) {
