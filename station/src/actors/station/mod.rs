@@ -41,7 +41,7 @@ pub struct StationActor {
     pub(crate) my_ip: String,
     pub(crate) payment_ip: String,
     pub(crate) pending_validations: HashMap<UserId, PendingValidation>,
-    pub(crate) pending_charges: HashMap<UserId, PendingCharge>,
+    pub(crate) pending_charges: HashMap<String, PendingCharge>, // rental_id -> PendingCharge
     pub(crate) active_rentals: HashMap<UserId, u64>,
 }
 

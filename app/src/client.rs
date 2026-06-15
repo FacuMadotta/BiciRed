@@ -1,4 +1,5 @@
-use common::BanNotification;
+use common::{BanNotification};
+use common::messages::RETURN_REJECTED_FRAUD_REASON;
 use rand::seq::SliceRandom;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -373,7 +374,13 @@ impl AppClient {
                     }
                     MessageType::ReturnRejected => {
                         let rej = ReturnRejected::deserialize(text);
-                        println!("\n[RECHAZO] Falló la devolución: {}", rej.reason);
+                        if rej.reason == RETURN_REJECTED_FRAUD_REASON {
+                            println!("[ADVERTENCIA] La bici fue devuelta correctamente, el cargo no se pudo completar por lo que tu ususario ha sido baneado.");
+                            self.current_rental = None;
+                            self.clear_rental_state();
+                        } else {
+                            println!("\n[RECHAZO] Falló la devolución: {}", rej.reason);
+                        }
                     }
                     _ => println!("\n[ERROR] Respuesta inesperada: {}", text),
                 }

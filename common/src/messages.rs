@@ -2,6 +2,9 @@ use crate::entities::*;
 use crate::message_types::MessageType;
 use actix::prelude::*;
 
+pub const RETURN_REJECTED_FRAUD_REASON: &str = "Fondos insuficientes para captura";
+
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct RentRequest {

@@ -105,7 +105,7 @@ impl Handler<RequestMessage<ReturnRequest, ConnectionActor>> for StationActor {
 
         if self.send_to_payment(capture_msg).is_ok() {
             self.pending_charges.insert(
-                msg.request.user_id,
+                msg.request.rental_id.clone(),
                 PendingCharge {
                     msg,
                     started_at: SystemTime::now(),
@@ -127,10 +127,7 @@ impl Handler<PaymentResult> for StationActor {
     type Result = ();
 
     fn handle(&mut self, msg: PaymentResult, _ctx: &mut Self::Context) {
-        let user_id = self
-            .client_id_from_rental(&msg.transaction_id)
-            .unwrap_or_default();
-        let charge = self.pending_charges.remove(&user_id);
+        let charge = self.pending_charges.remove(&msg.transaction_id);
 
         if let Some(pending_charge) = charge {
             if msg.success {
@@ -222,10 +219,23 @@ impl Handler<ReservationRejected> for StationActor {
                 let _ = sender.send(
                     UserBanned {
                         user_id,
-                        reason: msg.reason,
+                        reason: msg.reason.clone(),
                     }
                     .serialize(),
                 );
+            }
+
+            if msg.reason == "Fondos insuficientes para captura" {
+                // Caso en el que la tarjeta no tiene saldo, se asume fraude, se banea y se envia mensaje de ReturnRejected al cliente para que no quede esperando indefinidamente.
+                // Ademas, debemos devolver la bici al inventario, en caso contrario la bici nunca podra ser devuelta y el usuario quedaria baneado indefinidamente.
+                if let Some(message) = self.pending_charges.remove(&msg.transaction_id) {
+                    message.msg.response.do_send(ReturnRejected {
+                        reason: RETURN_REJECTED_FRAUD_REASON.to_string(),
+                    });
+
+                    self.station.return_bike(message.msg.request.slot_index, message.msg.request.bike_id);
+                    self.station.save_inventory();
+                }
             }
         }
     }
