@@ -346,40 +346,64 @@ El proceso PaymentService que funcionara como un banco mediante conexiones TCP y
 - Usa el rental_id para evitar cobros extra. Si ya esta en su memoria no cobra de vuelta
 
 ```rust
-struct PaymentService {
-    transactions: HashMap<TransactionId, Transaction>,
-    cards: HashMap<CardToken, Balance>,
+struct PaymentServiceActor {
+    transactions: HashMap<String, Transaction>,
+    cards: HashMap<String, u32>,
+    csv_path: String,
+}
+
+enum TransactionStatus {
+    PreAuthorized,
+    Committed,
+    Captured,
+    RolledBack,
 }
 
 struct Transaction {
     card_token: String,
     amount_cents: u32,
     status: TransactionStatus,
+    timestamp: Instant,
 }
 
-enum TransactionStatus {
-    PreAuthorized,
-    Commited,
-    Captured,
-    RolledBack,
-}
 ```
+
+### Aquitectura interna (actores)
+
+| Actor                 | Responsabilidad                                                                  |
+|-----------------------|------------------------------------------------------------------------------------|
+| `Acceptor`            | Escucha conexiones TCP entrantes (de las Stations)                                 |
+| `SpawnerActor`        | Crea un `ConnectionActor` por cada conexión nueva                                  |
+| `ConnectionActor`     | Traduce mensajes TCP a mensajes `actix` para el `PaymentServiceActor`             |
+| `PaymentServiceActor` | Único dueño de `transactions` y `cards`; ejecuta limpieza periódica de transacciones atascadas |
 
 #### Mensajes que recibe
 
-| Mensaje | Payload | Reacción |
-|----------|----------|-----------|
-| `PreparePayment` | `{ transaction_id, card_token, amount_cents }` | Si la tarjeta posee fondos suficientes, reserva el monto, registra la transacción como `PreAuthorized` y responde `VoteCommit`; en caso contrario responde `VoteAbort`. |
-| `CommitPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, actualiza su estado a `Commited`. |
-| `RollbackPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, reintegra el monto a la tarjeta y cambia el estado a `RolledBack`. |
-| `CapturePayment` | `{ transaction_id }` | Si la transacción estaba `Commited`, marca el cobro como definitivo cambiando el estado a `Captured`. |
+| Mensaje            | Payload                                          | Reacción                                                                                                  |
+|--------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `PREPARE_PAYMENT`  | `{ transaction_id, amount_cents, card_token }`     | Si la transacción ya existe, responde según su estado actual (idempotencia). Si no, intenta debitar el monto: si hay fondos, registra `PreAuthorized` y responde `VOTE_COMMIT`; si no, responde `VOTE_ABORT` |
+| `COMMIT_PAYMENT`   | `{ transaction_id }`                               | Si la transacción estaba `PreAuthorized`, pasa a `Committed`                                              |
+| `ROLLBACK_PAYMENT` | `{ transaction_id }`                               | Si estaba `PreAuthorized`, reintegra el monto a la tarjeta y pasa a `RolledBack`                          |
+| `CAPTURE_PAYMENT`  | `{ transaction_id, amount_cents }`                 | Si estaba `Committed` y hay fondos suficientes para el monto final, debita y pasa a `Captured`, responde `PAYMENT_RESULT { success: true }`; si no, responde `RESERVATION_REJECTED` |
+| `RESERVE_PAYMENT`  | `{ transaction_id, amount_cents, card_token }`     | Variante usada para reservas directas (modo offline): registra `Committed` y debita; si falla, responde `RESERVATION_REJECTED` |
 
 #### Mensajes que envía
 
-| Mensaje | Destino | Payload |
-|----------|----------|----------|
-| `VoteCommit` | Station | `{ transaction_id }` - Indica que la preautorización fue exitosa y la transacción puede continuar. |
-| `VoteAbort` | Station | `{ transaction_id }` - Indica que la transacción debe abortarse por falta de fondos o estado inválido. |
+| Mensaje                | Destino | Payload                                                       |
+|------------------------|---------|----------------------------------------------------------------|
+| `VOTE_COMMIT`           | Station | `{ transaction_id }`                                           |
+| `VOTE_ABORT`            | Station | `{ transaction_id }`                                           |
+| `PAYMENT_RESULT`        | Station | `{ transaction_id, success, amount_cents }`                    |
+| `RESERVATION_REJECTED`  | Station | `{ transaction_id, reason }`                                   |
+
+### Limpieza de transacciones atascadas
+
+Cada 10 segundos, `PaymentServiceActor` recorre `transactions` y revierte (`RolledBack`, reintegrando fondos) cualquier transacción que siga en `PreAuthorized` por más de 30 segundos. Esto evita que fondos preautorizados queden bloqueados indefinidamente si una Station cae a mitad del 2PC.
+
+### Persistencia
+
+- `cards`: persistido en el CSV idicando por argumento (`token,saldo`)
+- `transactions`: persistidas a disco y recargadas al iniciar (`load_transactions` / `save_transaction`)
 
 #### Protocolo de transporte
 
