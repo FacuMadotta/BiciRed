@@ -470,6 +470,7 @@ name = "station"
 version = "0.1.0"
 dependencies = [
  "actix",
+ "actix-rt",
  "common",
  "serde",
  "serde_json",

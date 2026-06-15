@@ -233,7 +233,8 @@ impl Handler<ReservationRejected> for StationActor {
                         reason: RETURN_REJECTED_FRAUD_REASON.to_string(),
                     });
 
-                    self.station.return_bike(message.msg.request.slot_index, message.msg.request.bike_id);
+                    self.station
+                        .return_bike(message.msg.request.slot_index, message.msg.request.bike_id);
                     self.station.save_inventory();
                 }
             }

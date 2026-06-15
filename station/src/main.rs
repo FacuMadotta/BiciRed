@@ -6,6 +6,9 @@ mod domain;
 use common::*;
 use domain::*;
 
+#[cfg(test)]
+mod station_tests;
+
 #[actix::main]
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
