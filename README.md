@@ -39,6 +39,8 @@ Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thr
 [APP] ──────────────────► [STATION]
 [APP] ──────────────────► [CENTRALSERVER]
 [STATION] ──────────────► [CENTRALSERVER]
+[STATION] ──────────────► [PAYMENTSERVICE]
+[CENTRALSERVER]─────────► [PAYMENTSERVICE]
 ```
 
 | Proceso         | Rol                                                        |
@@ -46,6 +48,7 @@ Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thr
 | `Station`       | Gestiona slots físicos, cobra pagos                        |
 | `CentralServer` | Mantiene estado global de todas las estaciones             |
 | `App`           | Simula la app móvil del usuario                            |
+| `PaymentService`| Autorizar pagos y reservar montos                          |
 
 Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente. Una actúa como **líder** (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás **réplicas** (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
 
@@ -56,8 +59,6 @@ Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente. U
 ### Station
 
 Gestiona los slots físicos de una estación. Detecta bicicletas, las bloquea y desbloquea, cobra tarifas y reporta su estado al servidor central. **Opera de forma autónoma aunque pierda conectividad.**
-
-> **Invariante:** Una estación no debe permitir más de un alquiler simultáneo sobre el mismo `slot_id`.
 
 #### Estado interno
 
@@ -77,6 +78,7 @@ enum SlotState {
     Empty,
     Occupied { bike_id: BikeId },
     Reserved,
+    ReservedForRent,
 }
 ```
 
@@ -87,7 +89,6 @@ enum SlotState {
 | `Acceptor`        | Escucha nuevas conexiones TCP desde la App; spawnea un `Handler` por conexión   |
 | `Handler`         | Traduce mensajes TCP a mensajes `mpsc` entre la App y el Station Actor          |
 | `Station Actor`   | Único dueño de `Vec<Slot>`; único que modifica el estado de los slots           |
-| `Actor de pago`    | Simula el proceso de pago de forma asíncrona para no bloquear la estación       |
 
 #### Mensajes que recibe
 
@@ -107,7 +108,7 @@ enum SlotState {
 | `ReturnRejected` | App             | `{ reason: String }`                                 |
 | `StationStatus`  | CentralServer   | `{ station_id, location, available_bikes, free_slots, timestamp_secs }` |
 | `Prepare`  | App   | `{}` - Verifica que la App sigue activa y sin reserva activa |
-| `PreparePayment`  | Actor de Pago | `{ card_token }` |
+| `PreparePayment`  | PaymentService | `{ card_token }` |
 | `Commit`  | Actor de Pago   | `{}` - confirma que el cobro una vez que ambos votan `Vote_Commit` |
 
 
@@ -120,8 +121,37 @@ TCP (stream sockets) con la App y con el CentralServer. `mpsc` internamenmte ent
 - **Feliz (alquiler):** ver [Flujo 1 - 2PC](#flujo-1--alquiler-caso-feliz)
 - **Feliz (devolución):** App envía `ReturnRequest` -> `Station Actor` bloquea slot, calcula cargo -> responde `ReturnConfirmed`
 - **App muere durante 2PC:** Timeout en el socket -> transacción abortada, slot vuelve a `Occupied`.
-- **Pago rechazado:** `Actor de Pago` responde `Vote_Abort` -> `Station Actor` aborta -> `RentRejected`.
+- **Pago rechazado:** `Payment Service` responde `Vote_Abort` -> `Station Actor` aborta -> `RentRejected`.
 - **Sin conectividad con CentralServer:** opera localmente, guarda la información recibida en un archivo local (CSV o JSON), y la envía al recuperar la red.
+
+#### Manejo de devoluciones
+
+```mermaid
+graph TD
+    A[Usuario inserta la bici en el slot] --> B[Station calcula tiempo transcurrido y costo proporcional]
+    B --> C{¿Está ONLINE u OFFLINE?}
+    
+    C -->|ONLINE con PaymentService| D[Escenario Online]
+    C -->|OFFLINE| E[Escenario Offline]
+
+    subgraph Escenario Online
+        D --> D1[1. Station solicita 'Capture' al PaymentService usando el rental_id]
+        D1 --> D2[2. El pago se procesa inmediatamente]
+        D2 --> D3[3. Se notifica éxito a la App]
+    end
+
+    subgraph Escenario Offline
+        E --> E1[1. Station guarda el cobro en pending_charges.json]
+        E1 --> E2[2. Libera al usuario en la App]
+        E2 --> E3[3. Un hilo interno BatchUpdate reintenta el cobro cuando vuelve la red]
+    end
+```
+
+Si previamente retiro una bicicleta en una estacion offline y al enviar Capture es rechazado el pago, entra en la lista negra del central server
+
+#### Identificacion alquileres
+introducir un identificador único global para el viaje/alquiler: el rental_id
+String rental_id = bike_id + user_id + timestamp. De esta manera será único y no deberá depender de sincronización para conseguir la unicidad
 
 ---
 
@@ -135,6 +165,7 @@ struct CentralServer {
     leader_id: Option<ServerId>,
     station_table: HashMap<StationId, StationStatus>,
     peers: Vec<(ServerId, SocketAddr)>,
+    blacklist: HashSet<UserId>, // Control global de morosos/robos
 }
 
 struct StationStatus {
@@ -187,7 +218,7 @@ TCP (stream sockets) para toda comunicación.
 
 - **Feliz:** Station envía `StationUpdate` al líder -> líder actualiza tabla y envía `ReplicaSync` -> App consulta réplica -> `NearbyResponse`
 - **Líder cae:** réplica detecta timeout de `Heartbeat` -> inicia elección Bully -> nuevo líder anuncia `Coordinator` con su dirección
-
+- Disminucion de heartbeats: Se minimizaran la cantidad de heartbeats. En lugar de hacerlo constantemente, se realizaran cuando se supere un umbral de tiempo sin transmitir actualizaciones de estado. Disminuirá la cantidad de mensajes, sin embargo no se vio una forma de conocer el estado del lider sin su envío.
 ---
 
 ### App
@@ -327,6 +358,76 @@ Usa `cached_stations` (última `NearbyResponse` recibida).
 
 ---
 
+## Payment Service
+
+El proceso PaymentService que funcionara como un banco mediante conexiones TCP ya sea con el server o con las estaciones
+- Preautoriza montos (asocia tarjeta, monto preautorizado y rental_id)
+- Cobra/Libera: Dependiendo del monto final cobra extra o libera el monto previo sobrante
+- Usa el rental_id para evitar cobros extra. Si ya esta en su memoria no cobra de vuelta
+
+```rust
+struct PaymentService {
+    transactions: HashMap<TransactionId, Transaction>,
+    cards: HashMap<CardToken, Balance>,
+}
+
+struct Transaction {
+    card_token: String,
+    amount_cents: u32,
+    status: TransactionStatus,
+}
+
+enum TransactionStatus {
+    PreAuthorized,
+    Commited,
+    Captured,
+    RolledBack,
+}
+```
+
+#### Mensajes que recibe
+
+| Mensaje | Payload | Reacción |
+|----------|----------|-----------|
+| `PreparePayment` | `{ transaction_id, card_token, amount_cents }` | Si la tarjeta posee fondos suficientes, reserva el monto, registra la transacción como `PreAuthorized` y responde `VoteCommit`; en caso contrario responde `VoteAbort`. |
+| `CommitPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, actualiza su estado a `Commited`. |
+| `RollbackPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, reintegra el monto a la tarjeta y cambia el estado a `RolledBack`. |
+| `CapturePayment` | `{ transaction_id }` | Si la transacción estaba `Commited`, marca el cobro como definitivo cambiando el estado a `Captured`. |
+
+#### Mensajes que envía
+
+| Mensaje | Destino | Payload |
+|----------|----------|----------|
+| `VoteCommit` | Station | `{ transaction_id }` - Indica que la preautorización fue exitosa y la transacción puede continuar. |
+| `VoteAbort` | Station | `{ transaction_id }` - Indica que la transacción debe abortarse por falta de fondos o estado inválido. |
+
+#### Protocolo de transporte
+
+TCP (stream sockets) para toda comunicación con las `Stations` y otros procesos del sistema.
+
+#### Casos de interés
+
+- **Preautorización exitosa:** recibe `PreparePayment` -> reserva temporalmente los fondos -> registra la transacción -> responde `VoteCommit`.
+- **Fondos insuficientes:** recibe `PreparePayment` -> detecta saldo insuficiente -> responde `VoteAbort`.
+- **Commit del alquiler:** recibe `CommitPayment` -> actualiza el estado a `Commited`.
+- **Abort de la transacción:** recibe `RollbackPayment` -> reintegra los fondos reservados -> actualiza el estado a `RolledBack`.
+- **Captura definitiva del pago:** recibe `CapturePayment` -> actualiza el estado a `Captured`.
+- **Reintentos de mensajes:** si recibe nuevamente un `PreparePayment` para una transacción ya registrada en estado `PreAuthorized` o `Commited`, responde nuevamente `VoteCommit`, evitando inconsistencias por retransmisiones.
+- **Prevención de cobros duplicados:** el uso de `transaction_id` permite identificar operaciones ya procesadas e impedir que una misma transacción sea ejecutada múltiples veces.
+
+#### Estados de una transacción
+
+```text
+PreparePayment
+        │
+        ▼
+PreAuthorized
+    ├── CommitPayment ─────► Commited ─── CapturePayment ───► Captured
+    │
+    └── RollbackPayment ─────────────────────────────────────► RolledBack
+```
+
+
 ## Algoritmos de concurrencia distribuida
 
 ### Elección de líder — Bully
@@ -342,6 +443,25 @@ Para evitar que `CentralServer` sea un único punto de falla, se mantiene una ca
 4. El nodo con el ID más alto que esté activo siempre gana.
 
 **Reconexión:** al recibir `Coordinator`, cada réplica actualiza su `leader_addr`. Por el lado de los clientes (Station o App), mantienen localmente una lista de direcciones IP de los nodos del servidor. Si fallan al conectarse con un nodo, intentan con el siguiente de su lista. Si logran conectarse pero el nodo no tiene el rol adecuado para procesar el mensaje, el servidor responderá con `NotLeader` o `NotReplica`, indicándole al cliente la dirección IP correcta a la cual debe reconectarse.
+
+
+### Persistencia y Recuperación del Estado ante Caída del Líder
+
+Durante la operación normal, el `CentralServer` líder replica de manera asíncrona la tabla global de estados (`station_table`) hacia las réplicas mediante el mensaje `ReplicaSync`. No obstante, si el líder sufre un crash inesperado, existe una pequeña ventana de tiempo en la cual los cambios de estado o transacciones recientes de las estaciones podrían no haber sido replicados, generando una pérdida potencial de información en los nodos restantes.
+
+Para solucionar esta inconsistencia tras la ejecución del algoritmo de Bully y la proclamación de un nuevo líder mediante el mensaje `Coordinator`, se implementa un **Protocolo de Reconciliación Activa**. El nuevo líder no asume que su copia local de la base de datos refleja la realidad de la ciudad; en su lugar, reconstruye el estado del sistema consultando directamente a las fuentes de la verdad: las estaciones distribuidas.
+
+#### Protocolo de Reconciliación Paso a Paso:
+
+1. **Detección y Elección:** Al caer el líder viejo, las réplicas ejecutan la elección por Bully. El nodo ganador se proclama enviando el mensaje `Coordinator(id, addr)` a sus peers.
+2. **Broadcast de Solicitud de Estado (`StateRequest`):** Inmediatamente después de asumir, el nuevo líder abre conexiones TCP y envía un mensaje de broadcast de tipo `StateRequest` a todas las direcciones de `Stations` conocidas en su configuración inicial o historial persistido.
+3. **Actualización de Redirección:** Al recibir este mensaje, las estaciones actualizan localmente la dirección IP del líder actual, asegurando que los futuros mensajes `StationUpdate` no sean rechazados.
+4. **Respuesta de Sincronización Activa:** Cada estación recopila su estado físico real actual y lee sus archivos de persistencia local (`pending_rents.json` y `pending_charges.json`). Luego, responde al nuevo líder con un payload consolidado que incluye:
+   * El estado actual e invariante de cada uno de sus slots físicos.
+   * Los alquileres locales generados en modo offline que aún no habían sido reportados.
+   * Las devoluciones locales pendientes de procesamiento o sincronización diferida.
+5. **Consolidación en el Servidor:** El nuevo líder procesa y consolida todas las respuestas de las estaciones. Una vez que la base de datos centralizada vuelve a reflejar fielmente el estado real de la red, el líder reanuda el envío periódico de `Heartbeats` y habilita la sincronización asíncrona hacia las réplicas (`ReplicaSync`), garantizando la consistencia eventual de todo el sistema distribuido.
+
 
 **Roles:**
 
@@ -360,28 +480,38 @@ Ver detalle en [Diagrama UML](#diagrama-de-elección-de-líder-bully)
 
 ### Transacciones de alquiler — 2PC
 
-Para garantizar el flujo en el alquiler de las bicicleta, evitando inconsistencias locales y distribuidas, en el que se alquile dos veces la misma bicicleta, se alquile una bicicleta sin pagar o un usuario alquile dos bicicletas al mismo tiempo, se recurrirá al uso de transacciones.
-El algoritmo de commit en dos fases permitirá que una bicicleta se libere sólamente si el pago fue autorizado
+Para garantizar el correcto flujo en el alquiler de las bicicletas, previniendo inconsistencias como el doble alquiler de una bicicleta, alquileres sin fondos autorizados, o múltiples retiros simultáneos por parte del mismo cliente, se recurre a un protocolo de compromiso en dos fases (2PC).
 
+**Identificador Único Global (`rental_id`)**: Al iniciarse la transacción, la estación genera un identificador único definido bajo la regla: `String rental_id = bike_id + user_id + timestamp`. Al componerse de estas variables concurrentes, posee unicidad global absoluta y elimina la dependencia de un servidor centralizado de sincronización.
 
 | Rol           | Participante               |
 |---------------|----------------------------|
-| Coordinador   | `Station Actor`            |
-| Participante 1| App del usuario            |
-| Participante 2| Hilo de pago               |
+| Coordinador   | `Station Actor`  |
+| Participante 1| App del usuario  |
+| Participante 2| Proceso `PaymentService` |
 
-**Fase 1 — Prepare:** la estación envía `Prepare` a ambos participantes:
-- Al **actor de pago**: verifica fondos y pre-autoriza el token de tarjeta.
-- A la **App**: verifica que sigue activa y sin reserva en curso.
+**Fase 1 — Prepare:**
+La estación muta el estado del slot físico a `ReservedForRent` y genera el `rental_id`. Acto seguido, envía de forma paralela un mensaje de `Prepare` a:
+- La **App**: Valida que la terminal del usuario continúe en línea y no retenga ninguna otra transacción o reserva activa en memoria.
+- El **PaymentService**: Comprueba los fondos de la tarjeta del cliente y efectúa de manera formal la preautorización del monto de seguridad asociado al `rental_id`.
 
-**Fase 2 — Commit / Abort:**
+**Fase 2 — Fase de Voto y Commit / Abort:**
+- **Voto Positivo**: Si la App y el `PaymentService` retornan en sus respuestas el flag `Vote_Commit` (lo que certifica retención exitosa de fondos y usuario habilitado), la transacción avanza.
+- **Voto Negativo o Timeout**: Si cualquiera de las partes emite un `Vote_Abort` o el socket de comunicación experimenta un timeout (ej. desconexión abrupta de la App), la estación aborta. Revierte de forma inmediata el slot a `Occupied` y envía las alertas de rollback pertinentes: si el problema provino de la App, se le ordena al `PaymentService` desreservar el monto; si el fallo fue del banco, se le instruye rollback a la App para limpiar su memoria.
+- **Commit Definitivo**: Tras el consenso exitoso, la estación despacha el mensaje definitivo de `Commit` a ambos procesos. Se destraba físicamente el slot de la bicicleta, la App asienta el registro en `ActiveRental`, y la estación notifica en paralelo al `CentralServer` líder que la bicicleta ha sido retirada.
 
-| Condición                                    | Resultado              |
-|----------------------------------------------|------------------------|
-| Pago aprobado + App responde `Vote_Commit`    | `Commit` → reserva guardada |
-| Pago rechazado                               | `Abort`                |
-| App no responde (caída)                      | `Abort`                |
-| App tiene reserva activa                     | `Abort`                |
+---
+**Caso offline**
+
+Station (Coordinador) genera el rental_id e intenta abrir un socket TCP con el PaymentService para solicitar la preautorización. Al no obtener respuesta, la estación detecta que está offline.
+Modo Optimista: la estación no aborta la transacción. Decide asumir el riesgo y degrada el 2PC, eliminando temporalmente al PaymentService de la votación en tiempo real.
+Guarda de forma inmediata y síncrona los datos del alquiler (rental_id, user_id, card_token, bike_id y timestamp) en un archivo local llamado pending_rents.json
+Responde RentConfirmed a la App enviándole el rental_id generado
+
+BatchUpdate: En cuanto detecta que la conexión TCP con el exterior se ha restablecido, lee el archivo pending_rents.json y envía en lote todas las preautorizaciones pendientes al PaymentService
+Envía un StationStatus consolidado al CentralServer líder para informarle qué bicicletas se retiraron mientras estuvo desconectada
+
+---
 
 **Post-commit:**
 - Si está **online**: envía `StationStatus` inmediatamente al líder del `CentralServer`.
@@ -406,4 +536,32 @@ El algoritmo de commit en dos fases permitirá que una bicicleta se libere sóla
 ### Diagrama de elección de líder (Bully)
 
 ![Diagrama de elección de líder](doc/alg_bully.png)
+
+### Diagrama de Recuperacion de Informacion Post Bully
+
+```mermaid
+sequenceDiagram
+    participant LV as Lider Viejo
+    participant NL as Nuevo Lider
+    participant ST as Estaciones
+    participant RE as Replicas
+
+    Note over LV: Crash del proceso
+    Note over RE,NL: Ejecucion del algoritmo Bully
+
+    NL->>RE: Coordinator(id, addr)
+
+    Note over NL: Asume como nuevo lider
+
+    NL->>ST: StateRequest
+
+    Note over ST: Actualizan IP del nuevo lider
+    Note over ST: Leen slots fisicos y archivos JSON
+
+    ST->>NL: Estado actual + operaciones locales
+
+    Note over NL: Reconstruccion del estado global
+
+    NL->>RE: ReplicaSync
+```
 
