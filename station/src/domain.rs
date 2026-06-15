@@ -122,7 +122,7 @@ impl Station {
     pub fn calculate_amount(&self, start_secs: u64, end_secs: u64) -> u32 {
         let duration_secs = end_secs.saturating_sub(start_secs);
         let minutes = duration_secs.div_ceil(60);
-        minutes as u32 * AMOUNT_PER_MINUTE_CENTS as u32
+        minutes as u32 * AMOUNT_PER_MINUTE_CENTS
     }
 
     pub fn save_inventory(&self) {

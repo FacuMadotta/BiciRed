@@ -9,7 +9,7 @@ pub trait Deserializable {
 impl Deserializable for MessageType {
     fn deserialize(input: &str) -> Self {
         let prefix = input.split("|").next().unwrap_or("");
-        MessageType::from_str(prefix).expect("Invalid message type")
+        MessageType::from_string(prefix).expect("Invalid message type")
     }
 }
 

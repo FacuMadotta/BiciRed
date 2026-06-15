@@ -1,5 +1,5 @@
-use common::{BanNotification};
 use common::messages::RETURN_REJECTED_FRAUD_REASON;
+use common::BanNotification;
 use rand::seq::SliceRandom;
 use std::io::{Read, Write};
 use std::net::TcpStream;

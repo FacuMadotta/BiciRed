@@ -91,12 +91,10 @@ impl ConnectionActor {
                     }
                 }
             }
-            "COORDINATOR" => {
-                if parts.len() == 2 {
-                    if let Ok(leader_id) = parts[1].parse::<ServerId>() {
-                        self.elector_addr
-                            .do_send(LeaderAnnouncementMessage { leader_id });
-                    }
+            "COORDINATOR" if parts.len() == 2 => {
+                if let Ok(leader_id) = parts[1].parse::<ServerId>() {
+                    self.elector_addr
+                        .do_send(LeaderAnnouncementMessage { leader_id });
                 }
             }
             _ => {}
@@ -194,12 +192,10 @@ impl ConnectionActor {
                     });
                 }
             }
-            "PING" => {
-                if parts.len() == 2 {
-                    if let Ok(id) = parts[1].parse::<StationId>() {
-                        self.server_addr
-                            .do_send(UpdateStationTimestamp { station_id: id });
-                    }
+            "PING" if parts.len() == 2 => {
+                if let Ok(id) = parts[1].parse::<StationId>() {
+                    self.server_addr
+                        .do_send(UpdateStationTimestamp { station_id: id });
                 }
             }
             _ => {}

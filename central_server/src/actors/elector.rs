@@ -36,15 +36,13 @@ impl ElectorActor {
 
     pub fn start_bully_timeout_monitor(&mut self, ctx: &mut Context<Self>) {
         ctx.run_interval(TIMEOUT_CHECK_INTERVAL, |actor, _ctx| {
-            if actor.election_in_progress {
-                if actor.leader_timeout.elapsed() >= COORDINATOR_TIMEOUT {
-                    if actor.can_be_leader {
-                        println!("[ELECTION] Coordinator timeout. Me proclamo lider");
-                        actor.announce_leader();
-                    } else {
-                        println!("[ELECTION] El nodo mayor falló en asumir. Reiniciando...");
-                        actor.init_election();
-                    }
+            if actor.election_in_progress && actor.leader_timeout.elapsed() >= COORDINATOR_TIMEOUT {
+                if actor.can_be_leader {
+                    println!("[ELECTION] Coordinator timeout. Me proclamo lider");
+                    actor.announce_leader();
+                } else {
+                    println!("[ELECTION] El nodo mayor falló en asumir. Reiniciando...");
+                    actor.init_election();
                 }
             }
         });

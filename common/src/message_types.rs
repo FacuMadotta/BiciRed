@@ -68,7 +68,7 @@ impl MessageType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "RENT_REQUEST" => Some(Self::RentRequest),
             "RETURN_REQUEST" => Some(Self::ReturnRequest),

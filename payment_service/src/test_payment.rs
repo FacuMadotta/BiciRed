@@ -1,13 +1,16 @@
 #[cfg(test)]
 mod tests {
+    use crate::actors::ConnectionActor;
+    use crate::service::{
+        models::{Transaction, TransactionStatus},
+        PaymentServiceActor,
+    };
     use actix::prelude::*;
     use common::*;
     use std::collections::HashMap;
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::time::{Duration, Instant};
-    use crate::actors::ConnectionActor;
-    use crate::service::{PaymentServiceActor, models::{Transaction, TransactionStatus}};
 
     // Helper para limpiar archivos residuales antes y después de cada test
     fn cleanup_files() {
@@ -32,7 +35,7 @@ mod tests {
         stream.set_nonblocking(true).unwrap();
         let start = Instant::now();
         let mut buf = [0; 1024];
-        
+
         loop {
             match stream.read(&mut buf) {
                 Ok(n) if n > 0 => return String::from_utf8_lossy(&buf[..n]).to_string(),
@@ -43,7 +46,7 @@ mod tests {
                 }
                 _ => return String::new(),
             }
-            
+
             // Timeout de seguridad de 2 segundos
             if start.elapsed().as_secs() > 2 {
                 return String::new();
@@ -57,7 +60,7 @@ mod tests {
     #[test]
     fn test_cleanup_stuck_transactions_libera_fondos() {
         cleanup_files();
-        
+
         let mut cards = HashMap::new();
         cards.insert("TOKEN_TEST".to_string(), 500); // Saldo inicial: 500 centavos
 
@@ -86,10 +89,10 @@ mod tests {
         // El estado debe haber mutado a RolledBack
         let tx = actor.transactions.get("tx_atascada_123").unwrap();
         assert_eq!(tx.status, TransactionStatus::RolledBack);
-        
+
         // El dinero retenido (200) debió reintegrarse al saldo de la tarjeta (500 + 200 = 700)
         assert_eq!(*actor.cards.get("TOKEN_TEST").unwrap(), 700);
-        
+
         cleanup_files();
     }
 
@@ -194,7 +197,7 @@ mod tests {
         let (server_side_stream, _) = listener.accept().unwrap();
 
         let mut cards = HashMap::new();
-        cards.insert("TOKEN_ROLLBACK".to_string(), 1000); 
+        cards.insert("TOKEN_ROLLBACK".to_string(), 1000);
 
         let payment_actor = PaymentServiceActor::new(cards, "test_cards.csv".to_string()).start();
         let conn_actor = ConnectionActor::new(server_side_stream, payment_actor.clone()).start();
@@ -219,8 +222,8 @@ mod tests {
         });
         actix_rt::time::sleep(Duration::from_millis(30)).await;
 
-        // 3. Verificación de caja negra: Si el saldo se restauró a 1000c, 
-        // una nueva petición de 800c debería entrar correctamente. 
+        // 3. Verificación de caja negra: Si el saldo se restauró a 1000c,
+        // una nueva petición de 800c debería entrar correctamente.
         // Si el rollback falló, el saldo seguiría en 400c y esta petición enviaría un VoteAbort.
         payment_actor.do_send(RequestMessage {
             request: PreparePayment {

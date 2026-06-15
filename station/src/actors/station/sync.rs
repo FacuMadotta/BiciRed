@@ -233,7 +233,7 @@ fn dispatch_central_messages(station_addr: &Addr<StationActor>, data: &str) {
             continue;
         }
         let prefix = line.split('|').next().unwrap_or("");
-        if let Some(msg_type) = MessageType::from_str(prefix) {
+        if let Some(msg_type) = MessageType::from_string(prefix) {
             match msg_type {
                 MessageType::UserValidationResult => {
                     station_addr.do_send(UserValidationResult::deserialize(line))
