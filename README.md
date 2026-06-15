@@ -29,6 +29,7 @@ Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thr
 - [Algoritmos de concurrencia distribuida](#algoritmos-de-concurrencia-distribuida)
   - [Elección de líder — Bully](#elección-de-líder--bully)
   - [Transacciones de alquiler — 2PC](#transacciones-de-alquiler--2pc)
+- [Guía de Ejecución y Comandos](#guía-de-ejecución-y-comandos)
 - [Diagramas](#diagramas)
 
 ---
@@ -516,6 +517,61 @@ Envía un StationStatus consolidado al CentralServer líder para informarle qué
 **Post-commit:**
 - Si está **online**: envía `StationStatus` inmediatamente al líder del `CentralServer`.
 - Si está **offline**: retiene el evento y lo incluye en el `BatchUpdate` al recuperar conectividad.
+
+---
+
+## Guía de Ejecución y Comandos
+
+### Requisitos Previos
+Tener instalado el *toolchain* oficial de Rust (`cargo` y `rustc` en versión estable).
+
+### 1. Compilación del Proyecto
+Para compilar todos los binarios que componen el ecosistema BiciRed de forma centralizada, desde la raíz del repositorio ejecutar:
+```bash
+cargo build --release
+```
+
+### 2. Ejecución del Servidor Central (Clúster de Servidores)
+El ejecutable requiere pasarle por argumento el ID único de nodo, la dirección IP/puerto local donde escuchará, y el archivo de ruteo CSV que define los miembros de la red:
+```bash
+# Firma: cargo run --bin central_server <server_id> <ip_servidor> <servers.csv>
+# Ejemplo para levantar un clúster local de 3 nodos independientes:
+cargo run --bin central_server 1 127.0.0.1:8000 servers.csv
+cargo run --bin central_server 2 127.0.0.1:8001 servers.csv
+cargo run --bin central_server 3 127.0.0.1:8002 servers.csv
+```
+
+### 3. Ejecución del banco (Payment Service)
+Para iniciar el servicio de cobros simulado; se requiere pasarle la dirección IP/puerto local donde escuchará, y el archivo de ruteo CSV donde se definen las tarjetas (Token y salgo)
+```bash
+# Firma: cargo run --bin payment_service <ip_banco> tarjetas.csv
+# Ejemplo:
+cargo run --bin payment_service 127.0.0.1:8080 tarjetas.csv
+```
+
+### 4. Ejecución de las estaciones
+Para iniciar el servicio de estaciones; se requiere pasarle por argumento el ID único de la estación, los archivos CSV donde se definen los servidores y estaciones (para obteners coordenas, slots, etc) y la dirección IP/puerto local donde escucha el banco.
+```bash
+# Firma: cargo run --bin station <id> servers.csv stations.csv <ip_banco>
+# Ejemplo:
+cargo run --bin station 1 servers.csv stations.csv 127.0.0.1:8080
+```
+
+### 5. Ejecución del banco (Payment Service)
+Para iniciar la aplicación del cliente, se requiere pasarle por argumento el ID único del cliente (como si fuese el nomnbre de usuario), y el archivo CSV donde se definen los servidores.
+
+```bash
+# Firma: cargo run --bin app <id> servers.csv
+# Ejemplo:
+cargo run --bin app 1 servers.csv
+```
+
+### 6. Ejecución de Tests
+Para ejecutar los tests armados.
+
+```bash
+cargo test
+```
 
 ---
 
