@@ -2,9 +2,9 @@
 
 # 🚲 BiciRed — Alquiler de Bicicletas
 
-El sistema modela una red de estaciones de bicicletas distribuidas por la ciudad. Cada componente corre como un proceso independiente; y la comunicación entre procesos es a través de sockets.
+El sistema modela una red de estaciones de bicicletas distribuidas por la ciudad. Cada componente corre como un proceso independiente; y la comunicación entre procesos es a través de stream sockets (TCP), usando mensajes de texto delimitados por `|`.
 
-Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thread independiente que sólo se comunica a través de canales (usando la librería de Rust mpsc) tipados. Por lo que, no hay memoria compartida entre actores.
+Dentro de cada proceso se aplica el **modelo de actores** (mediante librería `actix`): cada subsistema es un thread independiente que sólo se comunica a través de mensajes tipados. Por lo que, no hay memoria compartida entre actores.
 
 ### Integrantes
 
@@ -46,12 +46,12 @@ Dentro de cada proceso se aplica el modelo de actores: cada subsistema es un thr
 
 | Proceso         | Rol                                                        |
 |-----------------|------------------------------------------------------------|
-| `Station`       | Gestiona slots físicos, cobra pagos                        |
+| `Station`       | Gestiona slots físicos, coordina alquileres y devoluciones                        |
 | `CentralServer` | Mantiene estado global de todas las estaciones             |
 | `App`           | Simula la app móvil del usuario                            |
-| `PaymentService`| Autorizar pagos y reservar montos                          |
+| `PaymentService`| Actúa como banco; preutoriza, captura y libera montos                        |
 
-Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente. Una actúa como **líder** (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás **réplicas** (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
+Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente, definidas en un archivo `servers.csv`. Una actúa como **líder** (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás **réplicas** (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
 
 ---
 
@@ -59,7 +59,9 @@ Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente. U
 
 ### Station
 
-Gestiona los slots físicos de una estación. Detecta bicicletas, las bloquea y desbloquea, cobra tarifas y reporta su estado al servidor central. **Opera de forma autónoma aunque pierda conectividad.**
+Gestiona los slots físicos de una estación. Detecta bicicletas, las bloquea y desbloquea, coordina el cobro de tarifas con el `PaymentService` y reporta su estado al servidor central. **Opera de forma autónoma auqnue pierda conectivdad**.
+
+>**Invariante**: Cada `bike_id` pertenece a lo sumo a un alquiler activo a la vez. Una bicicleta solo puede ser alquilada si fue devuelta anteriormente (slot en estado `Occupied`, no `Empty` ni `Reserved`).
 
 #### Estado interno
 
@@ -68,6 +70,8 @@ struct Station {
     id: StationId,
     location: Location,
     slots: Vec<Slot>,
+    pending_rents: Vec<PendingRent>,
+    pending_charges: Vec<PendingCharge>
 }
 
 struct Slot {
@@ -78,73 +82,104 @@ struct Slot {
 enum SlotState {
     Empty,
     Occupied { bike_id: BikeId },
-    Reserved,
-    ReservedForRent,
+    Reserved { rental_id: String },
+}
+
+struct PendingRentRecord {
+    rental_id: String,
+    card_token: String,
+    bike_id: BikeId,
+    user_id: UserId,
+}
+
+struct PendingChargeRecord {
+    rental_id: String,
+    amount_cents: u32,
+    bike_id: BikeId,
 }
 ```
+
+### Identificación de alquileres - `rental_id`
+
+Cada viaje se identifica con un `rental_id` único generado por la Station al inicial el alquiler:
+
+```
+rental_id = bike_id + user_id + timestamp_secs
+```
+
+Esta combinación garantiza unicidad sin depender de sincronización distribuida: una misma bicicleta no puede ser alquilada dos veces por el mismo usuario en el mismo instante. El `rental_id` viaja en todos los mensajes relacionados al viaje (`Prepare`, `VOTE_COMMIT`, `RentConfirmed`, `ReturnRequest`, etc) y es usado por el `PaymentService` para garantizar independencia: si se recibe dos veces la misma operación para el mismo `rental_id`, no la repite.
 
 #### Arquitectura interna (threads)
 
 | Thread            | Responsabilidad                                                                 |
 |-------------------|---------------------------------------------------------------------------------|
-| `Acceptor`        | Escucha nuevas conexiones TCP desde la App; spawnea un `Handler` por conexión   |
-| `Handler`         | Traduce mensajes TCP a mensajes `mpsc` entre la App y el Station Actor          |
-| `Station Actor`   | Único dueño de `Vec<Slot>`; único que modifica el estado de los slots           |
+| `Acceptor`        | Escucha nuevas conexiones TCP entrantes (de la App); spawnea un `ConnectionActor` por conexión   |
+| `ConnectionActor`         | Traduce mensajes TCP (texto delimitado por `|`) a mensajes `actix` para el `StationActor`; uno por conexión          |
+| `StationActor`   | Único dueño de `Vec<Slot>`; coordina el 2PC de alquiler y el flujo de devolución          |
 
 #### Mensajes que recibe
 
-| Mensaje         | Payload                                    | Reacción                                                                                      |
-|-----------------|--------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `RentRequest`   | `{ user_id, slot_index, card_token }`      | Si slot ocupado → desbloquea bicicleta, responde `RentConfirmed`; si no → `RentRejected`      |
-| `ReturnRequest` | `{ user_id, bike_id, slot_index, started_at }` | Si slot vacío → bloquea bicicleta, calcula cargo proporcional al tiempo, responde `ReturnConfirmed`; si no → `ReturnRejected` |
-| `NotLeader` | CentralServer | `{ leader_addr: SocketAddr }` - Actualiza su dirección interna localmente del líder y reintenta enviar su `StationUpdate` a la nueva IP. |
+| Mensaje         | Payload                                                  | Reacción                                                                                                      |
+|-----------------|------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| `RENT_REQUEST`  | `{ user_id, slot_index, card_token }`                       | Si el slot está `Occupied` → genera `rental_id`, lo marca `Reserved` e inicia 2PC con App y PaymentService; si no → `RENT_REJECTED` |
+| `RETURN_REQUEST`| `{ user_id, bike_id, slot_index, started_at_secs, rental_id }` | Si el slot está `Empty` → calcula cargo proporcional al tiempo y solicita `CAPTURE_PAYMENT` al PaymentService; si no → `RETURN_REJECTED` |
+| `VOTE_COMMIT`   | `{ transaction_id }`                                        | Voto de la App durante la fase de votación del 2PC                                                          |
+| `VOTE_ABORT`    | `{ transaction_id }`                                        | Voto negativo de la App; dispara abort y rollback                                                            |
+| `NOT_LEADER`    | `{ leader_addr }`                                           | Actualiza la dirección del líder conocida y reintenta el `STATION_UPDATE` pendiente     
 
 #### Mensajes que envía
 
-| Mensaje          | Destino         | Payload                                              |
-|------------------|-----------------|------------------------------------------------------|
-| `RentConfirmed`  | App             | `{ bike_id, pre_auth_cents, timestamp_secs }`        |
-| `RentRejected`   | App             | `{ reason: String }`                                 |
-| `ReturnConfirmed`| App             | `{ charged_cents, timestamp_secs }`                  |
-| `ReturnRejected` | App             | `{ reason: String }`                                 |
-| `StationStatus`  | CentralServer   | `{ station_id, location, available_bikes, free_slots, timestamp_secs }` |
-| `Prepare`  | App   | `{}` - Verifica que la App sigue activa y sin reserva activa |
-| `PreparePayment`  | PaymentService | `{ card_token }` |
-| `Commit`  | Actor de Pago   | `{}` - confirma que el cobro una vez que ambos votan `Vote_Commit` |
+| Mensaje           | Destino              | Payload                                                                  |
+|-------------------|----------------------|----------------------------------------------------------------------------|
+| `PREPARE`         | App (TCP)            | `{ transaction_id }` — pide a la App confirmar que sigue activa y sin reserva |
+| `RENT_CONFIRMED`  | App (TCP)            | `{ bike_id, pre_auth_cents, timestamp_secs, rental_id }`                  |
+| `RENT_REJECTED`   | App (TCP)            | `{ reason }`                                                              |
+| `RETURN_CONFIRMED`| App (TCP)            | `{ charged_cents, timestamp_secs }`                                       |
+| `RETURN_REJECTED` | App (TCP)            | `{ reason }` — incluye el caso de fraude (ver `RETURN_REJECTED_FRAUD_REASON`) |
+| `STATION_UPDATE`  | CentralServer (TCP)  | `StationStatus { station_id, location, available_bikes, free_slots, updated_at_secs, station_addr, slots_occupied, slots_frees }` |
+| `PING`            | CentralServer (TCP)  | `{ station_id }` — heartbeat liviano para evitar que el líder elimine la estación por inactividad |
+| `PREPARE_PAYMENT` | PaymentService (TCP) | `{ transaction_id, amount_cents, card_token }` — preautoriza el monto de seguridad |
+| `COMMIT_PAYMENT`  | PaymentService (TCP) | `{ transaction_id }` — confirma la preautorización tras el commit del 2PC |
+| `ROLLBACK_PAYMENT`| PaymentService (TCP) | `{ transaction_id }` — cancela la preautorización si el 2PC aborta        |
+| `CAPTURE_PAYMENT` | PaymentService (TCP) | `{ transaction_id, amount_cents }` — cobra el monto final al devolver     |
+| `USER_BANNED`     | CentralServer (TCP)  | `{ user_id, reason }` — informa al líder que un usuario debe ser baneado (cobro de devolución rechazado) |
 
 
 #### Protocolo de transporte
 
-TCP (stream sockets) con la App y con el CentralServer. `mpsc` internamenmte entre threads.
+TCP (stream sockets) con la App, con el CentralServer y PaymentService. Mensajes de texto delimitados por `|`, un mensaje por línea (terminados en `\n`)
 
 #### Casos de interés
 
 - **Feliz (alquiler):** ver [Flujo 1 - 2PC](#flujo-1--alquiler-caso-feliz)
-- **Feliz (devolución):** App envía `ReturnRequest` -> `Station Actor` bloquea slot, calcula cargo -> responde `ReturnConfirmed`
-- **App muere durante 2PC:** Timeout en el socket -> transacción abortada, slot vuelve a `Occupied`.
-- **Pago rechazado:** `Payment Service` responde `Vote_Abort` -> `Station Actor` aborta -> `RentRejected`.
-- **Sin conectividad con CentralServer:** opera localmente, guarda la información recibida en un archivo local (CSV o JSON), y la envía al recuperar la red.
+- **Feliz (devolución online):** App envía `RETURN_REQUEST` → Station calcula cargo → envía `CAPTURE_PAYMENT` al PaymentService → responde `RETURN_CONFIRMED`.
+- **Devolución offline:** Station guarda en `pending_charges_{id}.json`, libera al usuario respondiendo `RETURN_CONFIRMED`, reintenta el cobro al recuperar red.
+- **App muere durante 2PC:** timeout en el socket → la estación aborta, envía `ROLLBACK_PAYMENT` al PaymentService, slot vuelve a `Occupied`.
+- **Pago rechazado en Prepare:** PaymentService responde `VOTE_ABORT` → Station envía rollback implícito a la App (no se confirma el alquiler), slot vuelve a `Occupied`.
+- **Cobro rechazado al devolver:** PaymentService responde `RESERVATION_REJECTED` → Station responde `RETURN_REJECTED { reason: RETURN_REJECTED_FRAUD_REASON }` y envía `USER_BANNED` al CentralServer líder. La bici queda devuelta físicamente (no penaliza al sistema), pero el usuario queda baneado.
+- **Sin conectividad con CentralServer:** opera localmente, guarda en `pending_rents_{id}.json` / `pending_charges_{id}.json`, reintenta `STATION_UPDATE` periódicamente.
 
 #### Manejo de devoluciones
 
 ```mermaid
 graph TD
     A[Usuario inserta la bici en el slot] --> B[Station calcula tiempo transcurrido y costo proporcional]
-    B --> C{¿Está ONLINE u OFFLINE?}
+    B --> C{¿PaymentService ONLINE o OFFLINE?}
     
-    C -->|ONLINE con PaymentService| D[Escenario Online]
+    C -->|PaymentService ONLINE| D[Escenario Online]
     C -->|OFFLINE| E[Escenario Offline]
 
     subgraph Escenario Online
         D --> D1[1. Station solicita 'Capture' al PaymentService usando el rental_id]
-        D1 --> D2[2. El pago se procesa inmediatamente]
-        D2 --> D3[3. Se notifica éxito a la App]
+        D1 --> D2["2. PaymentService cobra el monto; si falla, responde RESERVATION_REJECTED"]
+        D2 --> D3["3a. Éxito: RETURN_CONFIRMED a la App"]
+        D2 --> D4["3b. Rechazo: RETURN_REJECTED (fraude) + USER_BANNED al CentralServer"]
     end
 
     subgraph Escenario Offline
         E --> E1[1. Station guarda el cobro en pending_charges.json]
-        E1 --> E2[2. Libera al usuario en la App]
-        E2 --> E3[3. Un hilo interno BatchUpdate reintenta el cobro cuando vuelve la red]
+        E1 --> E2[2. Libera al usuario en la App usando RETURN_CONFIRMED]
+        E2 --> E3[3. Reintenta CAPTURE_PAYMENT cuando vuelve a la red]
     end
 ```
 
