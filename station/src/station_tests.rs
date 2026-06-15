@@ -1247,3 +1247,54 @@ async fn test_abort_expired_transactions_revierte_y_notifica_timeout() {
     let _ = listener;
     cleanup_station_files(id);
 }
+
+#[actix::test]
+async fn test_concurrencia_race_condition_dos_usuarios_piden_mismo_slot() {
+    let id = 9999;
+    let station = new_station(id, 4, 4);
+    let mut actor_struct = build_station_actor(station, "127.0.0.1:1");
+
+    let (payment_tx, _payment_rx) = mpsc::channel::<String>();
+    actor_struct.payment_service = Some(payment_tx);
+    let addr = actor_struct.start();
+
+    let (listener_user_1, conn_addr_1) = spawn_connection_actor().await;
+    let (listener_user_2, conn_addr_2) = spawn_connection_actor().await;
+
+    addr.do_send(RequestMessage {
+        request: RentRequest {
+            user_id: 1,
+            slot_index: 0,
+            card_token: "tok1".to_string(),
+        },
+        response: conn_addr_1.clone(),
+    });
+    addr.do_send(RequestMessage {
+        request: RentRequest {
+            user_id: 2,
+            slot_index: 0,
+            card_token: "tok2".to_string(),
+        },
+        response: conn_addr_2.clone(),
+    });
+
+    let response_1 = read_socket_response_async(&listener_user_1).await;
+    let response_2 = read_socket_response_async(&listener_user_2).await;
+
+    let user_1_gano = response_1.starts_with("PREPARE|");
+    let user_2_gano = response_2.starts_with("PREPARE|");
+
+    let user_1_perdio = response_1.starts_with("RENT_REJECTED|");
+    let user_2_perdio = response_2.starts_with("RENT_REJECTED|");
+
+    assert!(
+        user_1_gano ^ user_2_gano,
+        "Data Race prevenida: Solo un usuario pudo iniciar el 2PC sobre el slot"
+    );
+    assert!(
+        user_1_perdio ^ user_2_perdio,
+        "Data Race prevenida: El usuario que perdió fue rechazado por slot reservado"
+    );
+
+    cleanup_station_files(id);
+}
