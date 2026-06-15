@@ -23,6 +23,7 @@ Dentro de cada proceso se aplica el **modelo de actores** (mediante librería `a
   - [Station](#station)
   - [CentralServer](#centralserver)
   - [App](#app)
+  - [PaymentService](#paymentservice)
 - [Flujos principales](#flujos-principales)
 - [Manejo de errores y caídas](#manejo-de-errores-y-caídas)
 - [Operación offline](#operación-offline)
@@ -185,23 +186,24 @@ graph TD
 
 Si previamente retiro una bicicleta en una estacion offline y al enviar Capture es rechazado el pago, entra en la lista negra del central server
 
-#### Identificacion alquileres
-introducir un identificador único global para el viaje/alquiler: el rental_id
-String rental_id = bike_id + user_id + timestamp. De esta manera será único y no deberá depender de sincronización para conseguir la unicidad
-
 ---
 
 ### CentralServer
 
-Mantiene una vista actualizada del estado de todas las estaciones y responde consultas de disponibilidad. Recibe actualizaciones periódicas de las estaciones sin bloquearlas.
+Mantiene una vista actualizada del estado de todas las estaciones, responde consultas de disponibilidad y administra la lista de usuarios baneados. Recibe actualizaciones periódicas de las estaciones sin bloquearlas.
+
+Si dos nodos reciben un `STATION_UPDATE` con información contradictoria, gana la entrada más reciente (se reemplaza directamente porque solo el líder procesa escrituras).
 
 ```rust
-struct CentralServer {
-    id: ServerId,
+struct CentralServerActor {
+    server_id: ServerId,
+    is_leader: bool,
     leader_id: Option<ServerId>,
     station_table: HashMap<StationId, StationStatus>,
-    peers: Vec<(ServerId, SocketAddr)>,
-    blacklist: HashSet<UserId>, // Control global de morosos/robos
+    peers: HashMap<ServerId, Addr<ConnectionActor>>,
+    elector_addr: Option<Addr<ElectorActor>>,
+    peer_addrs: HashMap<ServerId, String>,
+    users_banned: HashMap<UserId, String>,
 }
 
 struct StationStatus {
@@ -209,42 +211,56 @@ struct StationStatus {
     location: Location,
     available_bikes: u8,
     free_slots: u8,
-    updated_at: Instant,
+    updated_at_secs: u64,
+    station_addr: String,
+    slots_occupied: String,
+    slots_frees: String,
 }
 ```
 
 #### Arquitectura interna (threads)
  
-| Thread | Responsabilidad |
-|---|---|
-| `Acceptor` | Escucha el puerto TCP. Por cada conexión entrante (de una Station o de una App) spawnea un Handler. |
-| `Handler` (uno por conexión) | Maneja la comunicación con el cliente conectado. Traduce mensajes TCP a mensajes mpsc para el Server Actor. |
-| `Server Actor` | Único dueño de `HashMap<StationId, StationStatus>`. Actualiza entradas y responde consultas.|
-| `ElectionActor` | Detecta timeout de la vida del líder e inicia la elección por Bully. Procesa mensajes `Election` y `Coordinator`. |
+| Actor              | Responsabilidad                                                                                              |
+|--------------------|------------------------------------------------------------------------------------------------------------|
+| `Acceptor`         | Escucha el puerto TCP propio; spawnea un `ConnectionActor` (entrante) por cada conexión nueva (Station, App o peer) |
+| `SpawnerActor`     | Recibe las conexiones entrantes del `Acceptor` y crea el `ConnectionActor` correspondiente                  |
+| `ConnectionActor`  | Uno por conexión TCP (entrante o saliente); parsea mensajes y los traduce a mensajes `actix` para `CentralServerActor` y `ElectorActor` |
+| `CentralServerActor` | Único dueño de `station_table` y `users_banned`; responde `NEARBY_QUERY`, aplica `STATION_UPDATE`, ejecuta garbage collection de estaciones inactivas |
+| `ElectorActor`     | Implementa el Algoritmo de Bully: detecta caída del líder, gestiona elecciones y anuncia coordinador        |
 
 #### Mensajes que recibe
 
-| Mensaje         | Payload                                         | Reacción                                                              |
-|-----------------|-------------------------------------------------|-----------------------------------------------------------------------|
-| `StationUpdate` | `{ station_id, location, bikes, slots, ts }`    | Actualiza entrada en `station_table` si el timestamp es más reciente  |
-| `NearbyQuery`   | `{ location, radius_km }`                       | Filtra tabla por distancia, responde `NearbyResponse`                 |
-| `ReplicaSync` | `{ station_table }` | Reemplaza tabla local con la del líder (solo réplicas) |
-| `Heartbeat` | `{}` | Confirma que el líder sigue activo; resetea el timeout |
-| `Election` | `{ candidate_id }` | Participa en el Algoritmo de Bully |
-| `Coordinator` | `{ leader_id }` | Actualiza `leader_id` local; el emisor se proclama líder |
+| Mensaje          | Payload                                                  | Reacción                                                                                       |
+|------------------|--------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| `STATION_UPDATE` | `StationStatus` serializado                              | Si es líder: actualiza `station_table` y dispara `REPLICA_SYNC`; si es réplica: responde `NOT_LEADER` |
+| `NEARBY_QUERY`   | `{ user_id, x, y, radius }`                              | Si es líder: responde `NOT_REPLICA` (delega la carga); si es réplica: filtra por distancia euclídea y responde `NEARBY_RESPONSE`, o `BAN_NOTIFICATION` si el usuario está baneado |
+| `VALIDATE_USER`  | `{ user_id }`                                            | Responde `USER_VALIDATION_RESULT` indicando si el usuario está en `users_banned`               |
+| `USER_BANNED`    | `{ user_id, reason }`                                    | Agrega el usuario a `users_banned`, persiste en disco y dispara `REPLICA_SYNC`                |
+| `REPLICA_SYNC`   | `{ station_table, banned_users }`                        | Si no es líder: reemplaza `station_table` y `users_banned` locales con los recibidos           |
+| `PING`           | `{ station_id }`                                         | Actualiza `updated_at_secs` de esa estación (heartbeat liviano, evita el GC)                    |
+| `HELLO`          | `{ server_id }`                                          | Registra la conexión entrante de un peer en `peers` y en el `ElectorActor`                      |
+| `ELECTION`       | `{ candidate_id }`                                       | El `ElectorActor` participa del Algoritmo de Bully                                              |
+| `ELECTION_ACK` / `ACK` | `{}`                                                | El `ElectorActor` marca que un nodo de mayor ID está vivo y se retira de la elección actual     |
+| `COORDINATOR`    | `{ leader_id }`                                          | El `ElectorActor` actualiza `leader_id`, ajusta `is_leader` y propaga `ROLE_UPDATE` al `CentralServerActor` |
 
 #### Mensajes que envía
 
-| Mensaje          | Destino | Payload                                                         |
-|------------------|---------|-----------------------------------------------------------------|
-| `NearbyResponse` | App     | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
-| `ReplicaSync` | Otros CentralServer | `{ station_table }` |
-| `Heartbeat` | Réplicas (solo líder) | `{}` |
-| `Election` | Nodos con ID mayor | `{ candidate_id }` |
-| `Ok` | Nodo que inició elección | `{}` — "yo tomo el control" |
-| `Coordinator` | Todos los nodos | `{ leader_id }` |
-| `NotLeader` | Station | `{ leader_addr: SocketAddr }` - Rechaza un `StationUpdate` (porque este nodo es réplica) y redirige a la Station al líder actual. |
-| `NotReplica` | App | `{ replica_addr: SocketAddr }` - Rechaza un `NearbyQuery` (porque este nodo es líder y delega la carga) y redirige a la App hacia una réplica. |
+| Mensaje           | Destino                  | Payload                                                              |
+|-------------------|--------------------------|------------------------------------------------------------------------|
+| `NEARBY_RESPONSE` | App                      | `Vec<StationStatus>` (estaciones dentro del radio)                    |
+| `BAN_NOTIFICATION`| App                      | `{ reason }`                                                          |
+| `USER_VALIDATION_RESULT` | Station / App      | `{ user_id, is_valid, reason }`                                       |
+| `NOT_LEADER`      | Station                  | `{ leader_addr }` — redirige el `STATION_UPDATE` al líder actual      |
+| `NOT_REPLICA`     | App                      | `{ replica_addr }` — redirige el `NEARBY_QUERY` a una réplica         |
+| `REPLICA_SYNC`    | Otros CentralServer (réplicas) | `{ station_table, banned_users }`                                |
+| `HELLO`           | Otros CentralServer (peers) | `{ server_id }` — handshake al establecer conexión saliente        |
+| `ELECTION`        | Peers con ID mayor       | `{ candidate_id }`                                                    |
+| `ELECTION_ACK`    | Peer que inició la elección | `{}` — "yo tengo ID mayor, abortá tu elección"                     |
+| `COORDINATOR`     | Todos los peers          | `{ leader_id }`                                                       |
+
+### Limpieza de estaciones
+
+El líder ejecuta cada 15 segundos una limpieza: si una estación no actualizó `updated_at_secs` (vía `STATION_UPDATE` o `PING`) en más de 30 segundos, se elimina de `station_table` y se propaga el cambio vía `REPLICA_SYNC`. Esto minimiza el envío de heartbeats explícitos: el propio `PING` liviano de la Station alcanza para mantenerla viva en la tabla. Si nunca llego, la estación se da como "muerta".
 
 #### Protocolo de transporte
 
@@ -252,61 +268,144 @@ TCP (stream sockets) para toda comunicación.
 
 #### Casos de interés
 
-- **Feliz:** Station envía `StationUpdate` al líder -> líder actualiza tabla y envía `ReplicaSync` -> App consulta réplica -> `NearbyResponse`
-- **Líder cae:** réplica detecta timeout de `Heartbeat` -> inicia elección Bully -> nuevo líder anuncia `Coordinator` con su dirección
-- Disminucion de heartbeats: Se minimizaran la cantidad de heartbeats. En lugar de hacerlo constantemente, se realizaran cuando se supere un umbral de tiempo sin transmitir actualizaciones de estado. Disminuirá la cantidad de mensajes, sin embargo no se vio una forma de conocer el estado del lider sin su envío.
+ 
+- **Feliz:** Station envía `STATION_UPDATE` al líder → líder actualiza `station_table` y dispara `REPLICA_SYNC` a las réplicas → App consulta una réplica → `NEARBY_RESPONSE`.
+- **Station conecta al nodo equivocado:** si no es líder, responde `NOT_LEADER` con la dirección del líder conocida.
+- **App conecta al líder:** el líder responde `NOT_REPLICA` con la dirección de una réplica, para no sobrecargar al nodo de escritura con consultas de lectura.
+- **Usuario baneado:** `NEARBY_QUERY` de un usuario baneado recibe `BAN_NOTIFICATION` en lugar de `NEARBY_RESPONSE`.
+- **Líder cae:** ver [Elección de líder — Bully](#elección-de-líder--bully).
+
 ---
 
 ### App
 
-Simula la app móvil del usuario. Se conecta directamente a la estación para alquilar/devolver y al servidor central para consultar disponibilidad. Mantiene caché local para operación offline.
+Simula la app móvil del usuario. Se conecta directamente a la estación para alquilar/devolver y al servidor central para consultar disponibilidad. Mantiene caché local para operación offline y persiste su alquiler activado en disco.
 
 ```rust
-struct App {
+struct AppClient {
     user_id: UserId,
     current_rental: Option<ActiveRental>,
-    cached_stations: Vec<StationSummary>,
+    cached_stations: Vec<StationStatus>,
+    is_blocked: bool,
+    central_servers: Vec<String>,
+    active_server_addr: String,
+    actual_rental_id: Option<String>,
 }
 
 struct ActiveRental {
     bike_id: BikeId,
     started_at_secs: u64,
     pre_auth_cents: u32,
-    retired_at_station: StationId,
+    station_id: StationId,
+}
+```
+
+`current_rental` se persiste en `rental_state_<user_id>.json` y se restaura al iniciar la App, de forma que un alquiler activo sobrevive a un reinicio del proceso.
+
+#### Mensajes que recibe
+
+| Mensaje           | Origen        | Payload                                                              |
+|-------------------|---------------|------------------------------------------------------------------------|
+| `RENT_CONFIRMED`  | Station       | `{ bike_id, pre_auth_cents, timestamp_secs, rental_id }`               |
+| `RENT_REJECTED`   | Station       | `{ reason }`                                                            |
+| `RETURN_CONFIRMED`| Station       | `{ charged_cents, timestamp_secs }`                                     |
+| `RETURN_REJECTED` | Station       | `{ reason }` — distingue el caso de fraude (`RETURN_REJECTED_FRAUD_REASON`) |
+| `NEARBY_RESPONSE` | CentralServer | `Vec<StationStatus>`                                                    |
+| `PREPARE`         | Station       | `{ transaction_id }` — la Station pide confirmar que la App sigue activa y sin reserva |
+| `NOT_REPLICA`     | CentralServer | `{ replica_addr }` — redirige a la réplica correcta                     |
+| `BAN_NOTIFICATION`| CentralServer | `{ reason }` — informa que el usuario fue baneado                       |
+
+#### Mensajes que envía
+
+| Mensaje          | Destino       | Payload                                                          |
+|------------------|---------------|---------------------------------------------------------------------|
+| `NEARBY_QUERY`   | CentralServer | `{ user_id, x, y, radius }`                                       |
+| `RENT_REQUEST`   | Station       | `{ user_id, slot_index, card_token }`                             |
+| `RETURN_REQUEST` | Station       | `{ user_id, bike_id, slot_index, started_at_secs, rental_id }`    |
+| `VOTE_COMMIT`    | Station       | `{ transaction_id }` — App activa y sin reserva activa             |
+
+#### Protocolo de transporte
+
+TCP (stream sockets). No escucha ningún puerto, solo incia conexiones. Implementa rotación de servidores: si falla al conectar con `active_server_addr`, rota al siguiente nodo de `central_servers` (hasta `MAX_RETRIES = 5`); sino lo da como servidor OFFLINE.
+
+#### Casos de interés
+
+- **Sin señal consultando disponibilidad:** si tras `MAX_RETRIES` no logra contactar a ningún `CentralServer`, muestra `cached_stations` (última `NEARBY_RESPONSE` recibida).
+- **Sin señal alquilando o devolviendo:** la App ya tiene la dirección de la Station en `cached_stations` (campo `station_addr`); conecta directamente sin pasar por el CentralServer.
+- **Conexión al nodo líder:** recibe `NOT_REPLICA`, actualiza `active_server_addr` a la réplica indicada y reintenta.
+- **Usuario bloqueado:** recibe `BAN_NOTIFICATION`, marca `is_blocked = true` y no permite nuevos alquileres.
+- **Reinicio con alquiler activo:** al arrancar, lee `rental_state_<user_id>.json` y restaura `current_rental`.
+
+---
+
+### Payment Service
+
+El proceso PaymentService que funcionara como un banco mediante conexiones TCP ya sea con el server o con las estaciones
+- Preautoriza montos (asocia tarjeta, monto preautorizado y rental_id)
+- Cobra/Libera: Dependiendo del monto final cobra extra o libera el monto previo sobrante
+- Usa el rental_id para evitar cobros extra. Si ya esta en su memoria no cobra de vuelta
+
+```rust
+struct PaymentService {
+    transactions: HashMap<TransactionId, Transaction>,
+    cards: HashMap<CardToken, Balance>,
+}
+
+struct Transaction {
+    card_token: String,
+    amount_cents: u32,
+    status: TransactionStatus,
+}
+
+enum TransactionStatus {
+    PreAuthorized,
+    Commited,
+    Captured,
+    RolledBack,
 }
 ```
 
 #### Mensajes que recibe
 
-| Mensaje          | Origen        | Payload                                                         |
-|------------------|---------------|-----------------------------------------------------------------|
-| `RentConfirmed`  | Station       | `{ bike_id, pre_auth_cents, timestamp_secs }`                   |
-| `RentRejected`   | Station       | `{ reason: String }`                                            |
-| `ReturnConfirmed`| Station       | `{ charged_cents, timestamp_secs }`                             |
-| `ReturnRejected` | Station       | `{ reason: String }`                                            |
-| `NearbyResponse` | CentralServer | `Vec<StationSummary { id, location, available_bikes, free_slots }>` |
-| `Prepare` | Station | `{}` - Station verifica que la App sigue activa y sin reserva |
-| `NotReplica` | CentralServer | `{ replica_addr: SocketAddr }` - Actualiza la IP del servidor en uso localmente y reintenta el `NearbyQuery` a la nueva dirección recibida. |
+| Mensaje | Payload | Reacción |
+|----------|----------|-----------|
+| `PreparePayment` | `{ transaction_id, card_token, amount_cents }` | Si la tarjeta posee fondos suficientes, reserva el monto, registra la transacción como `PreAuthorized` y responde `VoteCommit`; en caso contrario responde `VoteAbort`. |
+| `CommitPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, actualiza su estado a `Commited`. |
+| `RollbackPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, reintegra el monto a la tarjeta y cambia el estado a `RolledBack`. |
+| `CapturePayment` | `{ transaction_id }` | Si la transacción estaba `Commited`, marca el cobro como definitivo cambiando el estado a `Captured`. |
 
 #### Mensajes que envía
 
-| Mensaje         | Destino       | Payload                                          |
-|-----------------|---------------|--------------------------------------------------|
-| `NearbyQuery`   | CentralServer | `{ location, radius_km }`                        |
-| `RentRequest`   | Station       | `{ user_id, slot_index, card_token }`            |
-| `ReturnRequest` | Station       | `{ user_id, bike_id, slot_index, started_at }`   |
-| `Vote_Commit` | Station | `{}` - App activa y sin reserva activa |
-| `Vote_Abort` | Station | `{}` - App con reserva activa o error |
+| Mensaje | Destino | Payload |
+|----------|----------|----------|
+| `VoteCommit` | Station | `{ transaction_id }` - Indica que la preautorización fue exitosa y la transacción puede continuar. |
+| `VoteAbort` | Station | `{ transaction_id }` - Indica que la transacción debe abortarse por falta de fondos o estado inválido. |
 
 #### Protocolo de transporte
 
-TCP (stream sockets). No escucha ningún puerto, solo incia conexiones.
+TCP (stream sockets) para toda comunicación con las `Stations` y otros procesos del sistema.
 
 #### Casos de interés
 
-- **Sin señal consultado disponibilidad:** usa `cached_stations` (última `NearbyResponse` recibida).
-- **Sin señal alquilando o devolviendo:** la App ya tiene la IP de la Station guardada en `cached_stations`; conecta directamente sin pasar por el CentralServer.
-- **Líder caído:** reintenta con el siguiente peer conocido de su lidta hasta encontrar uno activo.
+- **Preautorización exitosa:** recibe `PreparePayment` -> reserva temporalmente los fondos -> registra la transacción -> responde `VoteCommit`.
+- **Fondos insuficientes:** recibe `PreparePayment` -> detecta saldo insuficiente -> responde `VoteAbort`.
+- **Commit del alquiler:** recibe `CommitPayment` -> actualiza el estado a `Commited`.
+- **Abort de la transacción:** recibe `RollbackPayment` -> reintegra los fondos reservados -> actualiza el estado a `RolledBack`.
+- **Captura definitiva del pago:** recibe `CapturePayment` -> actualiza el estado a `Captured`.
+- **Reintentos de mensajes:** si recibe nuevamente un `PreparePayment` para una transacción ya registrada en estado `PreAuthorized` o `Commited`, responde nuevamente `VoteCommit`, evitando inconsistencias por retransmisiones.
+- **Prevención de cobros duplicados:** el uso de `transaction_id` permite identificar operaciones ya procesadas e impedir que una misma transacción sea ejecutada múltiples veces.
+
+#### Estados de una transacción
+
+```text
+PreparePayment
+        │
+        ▼
+PreAuthorized
+    ├── CommitPayment ─────► Commited ─── CapturePayment ───► Captured
+    │
+    └── RollbackPayment ─────────────────────────────────────► RolledBack
+```
 
 ---
 
@@ -393,76 +492,6 @@ Usa `cached_stations` (última `NearbyResponse` recibida).
 - **Sincronización**: cuando la conexión se recupera, la estación envía un `BatchUpdate` al servidor para regularizar los estados.
 
 ---
-
-## Payment Service
-
-El proceso PaymentService que funcionara como un banco mediante conexiones TCP ya sea con el server o con las estaciones
-- Preautoriza montos (asocia tarjeta, monto preautorizado y rental_id)
-- Cobra/Libera: Dependiendo del monto final cobra extra o libera el monto previo sobrante
-- Usa el rental_id para evitar cobros extra. Si ya esta en su memoria no cobra de vuelta
-
-```rust
-struct PaymentService {
-    transactions: HashMap<TransactionId, Transaction>,
-    cards: HashMap<CardToken, Balance>,
-}
-
-struct Transaction {
-    card_token: String,
-    amount_cents: u32,
-    status: TransactionStatus,
-}
-
-enum TransactionStatus {
-    PreAuthorized,
-    Commited,
-    Captured,
-    RolledBack,
-}
-```
-
-#### Mensajes que recibe
-
-| Mensaje | Payload | Reacción |
-|----------|----------|-----------|
-| `PreparePayment` | `{ transaction_id, card_token, amount_cents }` | Si la tarjeta posee fondos suficientes, reserva el monto, registra la transacción como `PreAuthorized` y responde `VoteCommit`; en caso contrario responde `VoteAbort`. |
-| `CommitPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, actualiza su estado a `Commited`. |
-| `RollbackPayment` | `{ transaction_id }` | Si la transacción estaba `PreAuthorized`, reintegra el monto a la tarjeta y cambia el estado a `RolledBack`. |
-| `CapturePayment` | `{ transaction_id }` | Si la transacción estaba `Commited`, marca el cobro como definitivo cambiando el estado a `Captured`. |
-
-#### Mensajes que envía
-
-| Mensaje | Destino | Payload |
-|----------|----------|----------|
-| `VoteCommit` | Station | `{ transaction_id }` - Indica que la preautorización fue exitosa y la transacción puede continuar. |
-| `VoteAbort` | Station | `{ transaction_id }` - Indica que la transacción debe abortarse por falta de fondos o estado inválido. |
-
-#### Protocolo de transporte
-
-TCP (stream sockets) para toda comunicación con las `Stations` y otros procesos del sistema.
-
-#### Casos de interés
-
-- **Preautorización exitosa:** recibe `PreparePayment` -> reserva temporalmente los fondos -> registra la transacción -> responde `VoteCommit`.
-- **Fondos insuficientes:** recibe `PreparePayment` -> detecta saldo insuficiente -> responde `VoteAbort`.
-- **Commit del alquiler:** recibe `CommitPayment` -> actualiza el estado a `Commited`.
-- **Abort de la transacción:** recibe `RollbackPayment` -> reintegra los fondos reservados -> actualiza el estado a `RolledBack`.
-- **Captura definitiva del pago:** recibe `CapturePayment` -> actualiza el estado a `Captured`.
-- **Reintentos de mensajes:** si recibe nuevamente un `PreparePayment` para una transacción ya registrada en estado `PreAuthorized` o `Commited`, responde nuevamente `VoteCommit`, evitando inconsistencias por retransmisiones.
-- **Prevención de cobros duplicados:** el uso de `transaction_id` permite identificar operaciones ya procesadas e impedir que una misma transacción sea ejecutada múltiples veces.
-
-#### Estados de una transacción
-
-```text
-PreparePayment
-        │
-        ▼
-PreAuthorized
-    ├── CommitPayment ─────► Commited ─── CapturePayment ───► Captured
-    │
-    └── RollbackPayment ─────────────────────────────────────► RolledBack
-```
-
 
 ## Algoritmos de concurrencia distribuida
 
