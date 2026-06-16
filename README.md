@@ -593,14 +593,11 @@ Para solucionar esta inconsistencia tras la ejecución del algoritmo de Bully y 
 
 #### Protocolo de Reconciliación Paso a Paso:
 
-1. **Detección y Elección:** Al caer el líder viejo, las réplicas ejecutan la elección por Bully. El nodo ganador se proclama enviando el mensaje `Coordinator(id, addr)` a sus peers.
-2. **Broadcast de Solicitud de Estado (`StateRequest`):** Inmediatamente después de asumir, el nuevo líder abre conexiones TCP y envía un mensaje de broadcast de tipo `StateRequest` a todas las direcciones de `Stations` conocidas en su configuración inicial o historial persistido.
-3. **Actualización de Redirección:** Al recibir este mensaje, las estaciones actualizan localmente la dirección IP del líder actual, asegurando que los futuros mensajes `StationUpdate` no sean rechazados.
-4. **Respuesta de Sincronización Activa:** Cada estación recopila su estado físico real actual y lee sus archivos de persistencia local (`pending_rents.json` y `pending_charges.json`). Luego, responde al nuevo líder con un payload consolidado que incluye:
-   * El estado actual e invariante de cada uno de sus slots físicos.
-   * Los alquileres locales generados en modo offline que aún no habían sido reportados.
-   * Las devoluciones locales pendientes de procesamiento o sincronización diferida.
-5. **Consolidación en el Servidor:** El nuevo líder procesa y consolida todas las respuestas de las estaciones. Una vez que la base de datos centralizada vuelve a reflejar fielmente el estado real de la red, el líder reanuda el envío periódico de `Heartbeats` y habilita la sincronización asíncrona hacia las réplicas (`ReplicaSync`), garantizando la consistencia eventual de todo el sistema distribuido.
+1. **Detección y Elección:** Al caer el líder viejo, los sockets TCP de las réplicas se cierran abruptamente. Los nodos detectan la caída y ejecutan la elección por Bully. El nodo ganador se proclama enviando el mensaje `Coordinator(id)` a sus peers.
+2. **Asunción Inmediata:** El nuevo líder actualiza su estado interno (`is_leader = true`). Dado que ya posee la última versión de la `station_table` gracias a las replicaciones pasadas, comienza a aceptar operaciones de escritura instantáneamente. No necesita interrogar al resto de la red.
+3. **Redirección de Estaciones (Lazy Routing):** Las estaciones físicas son ajenas a las elecciones del servidor. Cuando una estación intenta enviar su `StationUpdate` periódico, el socket falla (por el crash previo) y la estación itera sobre su lista local de IPs buscando un nodo activo.
+   * Si se conecta de casualidad a un nodo que actualmente es réplica, este rechaza el mensaje y responde con `NotLeader(ip_nuevo_lider)`, informándole a dónde debe dirigirse.
+4. **Convergencia:** La estación actualiza su enrutamiento interno y envía el `StationUpdate` a la IP correcta. El nuevo líder procesa la actualización y emite un nuevo `ReplicaSync` al resto del clúster (Broadcast), manteniendo la consistencia.
 
 
 **Roles:**
