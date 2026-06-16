@@ -522,23 +522,47 @@ App  ──NearbyQuery──►  réplica_2  (consulta exitosa)
 
 | Escenario                  | Comportamiento                                                                                       |
 |----------------------------|------------------------------------------------------------------------------------------------------|
-| **Crash de la App**        | La estación tiene timeout en el socket; si la App no confirma el retiro, el slot se libera automáticamente luego de `x` segundos (configurable) |
-| **Caída del CentralServer**| Las estaciones siguen funcionando. Los usuarios no pueden buscar nuevas estaciones pero pueden interactuar con las que ya conocen |
+| **Crash de la App durante 2PC**    | Station detecta timeout esperando `VOTE_COMMIT`; aborta, envía `ROLLBACK_PAYMENT` al PaymentService, slot vuelve a `Occupied` |
 | **Fallo en pago**          | La transacción se marca como `pending` para ser reintentada más adelante                             |
-| **Muerte de Proceso Station** | La información actual se guardará en disco para mantener el último estado antes de la caída, para una posterior recuperación
-
+| **Muerte de Proceso Station** | La información actual se guardará en disco en un archivo json para mantener el último estado antes de la caída, para una posterior recuperación |
+| **Pago rechazado en Prepare**      | PaymentService responde `VOTE_ABORT`; Station no confirma el alquiler, responde `RENT_REJECTED`, slot vuelve a `Occupied` |
+| **Cobro rechazado al devolver**    | PaymentService responde `RESERVATION_REJECTED`; Station responde `RETURN_REJECTED` (fraude) y envía `USER_BANNED` al líder |
+| **Caída del CentralServer (TODOS)**| Las estaciones siguen funcionando. Los usuarios no pueden buscar nuevas estaciones pero pueden interactuar con las que ya conocen; al reconectarse lee archivo json de los baneados. |
+| **Caída del CentralServer líder**  | `ElectorActor` de las réplicas detecta `PeerDisconnected`; eligen nuevo líder por Bully; nuevo líder dispara `REPLICA_SYNC` |
+| **Caída de Station**               | `pending_rents.json` y `pending_charges.json` preservan el estado offline; al reiniciar, retoma el envío pendiente       |
+| **Caída de la App**                | `rental_state_<user_id>.json` preserva `current_rental`; al reiniciar, la App restaura su alquiler activo                |
+| **Transacción de pago atascada**   | `PaymentServiceActor` revierte automáticamente (`RolledBack`) transacciones `PreAuthorized` con más de 30 segundos       |
+| **Estación inactiva/caducada**              | El líder elimina de `station_table`; estaciones sin `STATION_UPDATE`/`PING` por más de 30 segundos, y propaga vía `REPLICA_SYNC` |
+ 
 ---
 
 ## Operación offline
 
 ### App sin señal — consulta de disponibilidad
 
-Usa `cached_stations` (última `NearbyResponse` recibida).
+Tras `MAX_RETRIES` fallidos rotando entre los `CentralServer` conocidos, usa `cached_stations` (última `NearbyResponse` recibida).
 
 ### Pérdida de conexión con CentralServer (App o Station)
 
 - **Alquiler**: se permite si la App ya tiene la IP de la estación en caché. La estación guarda el evento localmente y actualiza su estado.
 - **Sincronización**: cuando la conexión se recupera, la estación envía un `BatchUpdate` al servidor para regularizar los estados.
+
+### Station sin conexión con CentralServer o PaymentService
+ 
+**Alquiler offline (modo optimista):**
+- La Station genera el `rental_id` e intenta contactar al `PaymentService`. Si no responde, asume el riesgo y degrada el 2PC (no espera el voto del banco en tiempo real).
+- Guarda inmediatamente y de forma síncrona en `pending_rents.json`: `{ rental_id, user_id, card_token, bike_id, timestamp }`.
+- Responde `RENT_CONFIRMED` a la App con el `rental_id` generado.
+
+**Devolución offline:**
+- La Station calcula el cargo y lo guarda en `pending_charges.json`: `{ rental_id, bike_id, charged_cents }`.
+- Libera al usuario respondiendo `RETURN_CONFIRMED`.
+
+**Sincronización al recuperar red:**
+- Lee `pending_rents.json` y envía `PREPARE_PAYMENT`/`RESERVE_PAYMENT` en lote al `PaymentService`.
+- Lee `pending_charges.json` y envía `CAPTURE_PAYMENT` en lote.
+- Envía `STATION_UPDATE` consolidado al `CentralServer` líder para informar qué bicicletas se retiraron/devolvieron mientras estuvo desconectada.
+- Si algún `CAPTURE_PAYMENT` pendiente es rechazado, se notifica `USER_BANNED` al líder.
 
 ---
 
@@ -548,12 +572,14 @@ Usa `cached_stations` (última `NearbyResponse` recibida).
 
 Para evitar que `CentralServer` sea un único punto de falla, se mantiene una cantidad de réplicas constantes del servidor ejecutándose de forma independiente.
 
-**Detección de caída:** el líder envía un `Hearbeat` periódico a todas las réplicas. Si una réplica no recibe el hearbeat tras varios intervalos, inicia la elección.
+**Topología de conexiones:** cada nodo abre conexión saliente hacia los peers con `id` mayor al propio (y dirección distinta a la propia); los nodos con `id` menor reciben esas conexiones como entrantes.
+
+**Detección de caída:** Cuando la conexión TCP con un peer se cierra, `ConnectionActor` notifica `PeerDisconnected` al `ElectorActor`. Si el peer caído era el líder (`leader_id`), se limpia el estado local y se inicia una nueva elección.
 
 **Algoritmo**:
 1. El nodo que detecta la caída envía `Election` a todos los nodos con ID mayor.
 2. Si nadie responde -> se proclama líder, anuncia `Coordinator` con su dirección a todos.
-3. Si alguien responde `Ok` -> ese nodo toma el control y repite el proceso hacia arriba.
+3. Si alguien responde `ELECTION_ACK` -> ese nodo toma el control y repite el proceso hacia arriba.
 4. El nodo con el ID más alto que esté activo siempre gana.
 
 **Reconexión:** al recibir `Coordinator`, cada réplica actualiza su `leader_addr`. Por el lado de los clientes (Station o App), mantienen localmente una lista de direcciones IP de los nodos del servidor. Si fallan al conectarse con un nodo, intentan con el siguiente de su lista. Si logran conectarse pero el nodo no tiene el rol adecuado para procesar el mensaje, el servidor responderá con `NotLeader` o `NotReplica`, indicándole al cliente la dirección IP correcta a la cual debe reconectarse.
@@ -715,22 +741,18 @@ sequenceDiagram
     participant ST as Estaciones
     participant RE as Replicas
 
-    Note over LV: Crash del proceso
+    Note over LV: Crash del proceso (conexión TCP cerrada)
     Note over RE,NL: Ejecucion del algoritmo Bully
 
-    NL->>RE: Coordinator(id, addr)
+    NL->>RE: Coordinator(leader_id)
 
-    Note over NL: Asume como nuevo lider
+    Note over NL: Asume como nuevo lider (is_leader = true)
 
-    NL->>ST: StateRequest
+    ST->>NL: STATION_UPDATE / PING
 
-    Note over ST: Actualizan IP del nuevo lider
-    Note over ST: Leen slots fisicos y archivos JSON
-
-    ST->>NL: Estado actual + operaciones locales
-
-    Note over NL: Reconstruccion del estado global
+    Note over NL: station_table se actualiza con datos frescos de cada estación
 
     NL->>RE: ReplicaSync
+    Note over RE: Sincronizan tabla y baneados con el nuevo líder
 ```
 
