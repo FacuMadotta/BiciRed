@@ -303,7 +303,7 @@ impl Handler<IncomingData> for ConnectionActor {
                         self.handle_election_protocol(&parts, ctx);
                     }
                     "STATION_UPDATE" | "VALIDATE_USER" | "USER_BANNED" | "NEARBY_QUERY"
-                    | "REPLICA_SYNC" | "PING" => {
+                    | "REPLICA_SYNC" | "PING" | "RETURN_RENT" => {
                         self.handle_central_protocol(&parts, message_text, ctx);
                     }
                     _ => {
