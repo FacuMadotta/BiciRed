@@ -693,7 +693,7 @@ Para iniciar el servicio de estaciones; se requiere pasarle por argumento el ID 
 cargo run --bin station 1 servers.csv stations.csv 127.0.0.1:8080
 ```
 
-### 5. Ejecución del banco (Payment Service)
+### 5. Ejecución de la App
 Para iniciar la aplicación del cliente, se requiere pasarle por argumento el ID único del cliente (como si fuese el nomnbre de usuario), y el archivo CSV donde se definen los servidores.
 
 ```bash
