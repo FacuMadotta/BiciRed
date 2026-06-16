@@ -50,7 +50,7 @@ Dentro de cada proceso se aplica el **modelo de actores** (mediante librería `a
 | `Station`       | Gestiona slots físicos, coordina alquileres y devoluciones                        |
 | `CentralServer` | Mantiene estado global de todas las estaciones             |
 | `App`           | Simula la app móvil del usuario                            |
-| `PaymentService`| Actúa como banco; preutoriza, captura y libera montos                        |
+| `PaymentService`| Actúa como banco; preautoriza, captura y libera montos                        |
 
 Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente, definidas en un archivo `servers.csv`. Una actúa como **líder** (recibe actualizaciones de las Stations y replica el estado a los demás nodos). Las demás **réplicas** (responden consultas de disponibilidad de las Apps). Si el líder cae, los nodos restantes eligen a uno nuevo mediante el [Algoritmo de Bully](#elección-de-líder--bully).
 
@@ -60,7 +60,7 @@ Se pueden correr múltiples instalaciones de `CentralServer` simultáneamente, d
 
 ### Station
 
-Gestiona los slots físicos de una estación. Detecta bicicletas, las bloquea y desbloquea, coordina el cobro de tarifas con el `PaymentService` y reporta su estado al servidor central. **Opera de forma autónoma auqnue pierda conectivdad**.
+Gestiona los slots físicos de una estación. Detecta bicicletas, las bloquea y desbloquea, coordina el cobro de tarifas con el `PaymentService` y reporta su estado al servidor central. **Opera de forma autónoma aunque pierda conectivdad**.
 
 >**Invariante**: Cada `bike_id` pertenece a lo sumo a un alquiler activo a la vez. Una bicicleta solo puede ser alquilada si fue devuelta anteriormente (slot en estado `Occupied`, no `Empty` ni `Reserved`).
 
@@ -678,7 +678,7 @@ cargo run --bin central_server 3 127.0.0.1:8002 servers.csv
 ```
 
 ### 3. Ejecución del banco (Payment Service)
-Para iniciar el servicio de cobros simulado; se requiere pasarle la dirección IP/puerto local donde escuchará, y el archivo de ruteo CSV donde se definen las tarjetas (Token y salgo)
+Para iniciar el servicio de cobros simulado; se requiere pasarle la dirección IP/puerto local donde escuchará, y el archivo de ruteo CSV donde se definen las tarjetas (Token y saldo)
 ```bash
 # Firma: cargo run --bin payment_service <ip_banco> tarjetas.csv
 # Ejemplo:
