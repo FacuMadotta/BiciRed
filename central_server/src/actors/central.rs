@@ -40,6 +40,7 @@ impl CentralServerActor {
             peer_addrs,
             elector_addr: None,
             users_banned,
+            indultos: std::collections::HashSet::new(),
         }
     }
 
