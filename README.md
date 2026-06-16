@@ -338,7 +338,7 @@ TCP (stream sockets). No escucha ningún puerto, solo incia conexiones. Implemen
 
 ---
 
-### Payment Service
+### PaymentService
 
 El proceso PaymentService que funcionara como un banco mediante conexiones TCP ya sea con el server o con las estaciones
 - Preautoriza montos (asocia tarjeta, monto preautorizado y rental_id)
@@ -438,47 +438,72 @@ PreAuthorized
 ### Flujo 1 — Alquiler (caso feliz)
 
 ```
-App  ──RentRequest──────────────────►  Station
-     ◄── [2PC interno: Prepare / Vote / Commit] ──►  Actor de Pago
-App  ◄──RentConfirmed────────────────  Station
-                      Station  ──StationStatus──►  CentralServer líder
-                                       líder  ──ReplicaSync──►  Réplicas
+App  ──RENT_REQUEST───────────────────────────────►  Station
+                                                     Station genera rental_id
+                                                     marca slot Reserved
+                              Station  ──PREPARE_PAYMENT──►  PaymentService
+                              Station  ◄─VOTE_COMMIT───────  PaymentService
+Station  ──PREPARE(transaction_id)──────────────────►  App
+App  ──VOTE_COMMIT(transaction_id)───────────────────►  Station
+                              Station  ──COMMIT_PAYMENT──►  PaymentService
+App  ◄──RENT_CONFIRMED(rental_id, bike_id, pre_auth)──  Station
+                         Station  ──STATION_UPDATE──►  CentralServer líder
+                                    líder  ──REPLICA_SYNC──►  Réplicas
 ```
 
 ### Flujo 2 — Devolución (caso feliz)
 
 ```
-App  ──ReturnRequest────────────────►  Station
-App  ◄──ReturnConfirmed──────────────  Station
-                      Station  ──StationStatus──►  CentralServer líder
-                                       líder  ──ReplicaSync──►  Réplicas
+App  ──RETURN_REQUEST(rental_id)────────────────────►  Station
+                                                       Station calcula cargo
+                              Station  ──CAPTURE_PAYMENT(rental_id, charged_cents)──►  PaymentService
+                              Station  ◄─PAYMENT_RESULT(success=true)──────────────  PaymentService
+App  ◄──RETURN_CONFIRMED──────────────────────────────  Station
+                         Station  ──STATION_UPDATE──►  CentralServer líder
+                                    líder  ──REPLICA_SYNC──►  Réplicas
+```
+
+### Flujo 2b — Devolución con cobro rechazado (fraude)
+ 
+```
+App  ──RETURN_REQUEST(rental_id)────────────────────►  Station
+                              Station  ──CAPTURE_PAYMENT──►  PaymentService
+                              Station  ◄─RESERVATION_REJECTED──  PaymentService
+App  ◄──RETURN_REJECTED(reason=FRAUD)─────────────────  Station
+                         Station  ──USER_BANNED(user_id, reason)──►  CentralServer líder
+                                    líder  ──REPLICA_SYNC──►  Réplicas (banned_users actualizado)
 ```
 
 ### Flujo 3 — Consulta de estaciones cercanas
 
 ```
-App  ──NearbyQuery──►  CentralServer
-App  ◄──NearbyResponse──  CentralServer
+App  ──NEARBY_QUERY(user_id, x, y, radius)──────────►  CentralServer (cualquiera)
+       si es líder:
+App  ◄──NOT_REPLICA(replica_addr)────────────────────  CentralServer líder
+App  ──NEARBY_QUERY──────────────────────────────────►  CentralServer réplica
+App  ◄──NEARBY_RESPONSE(stations)────────────────────  CentralServer réplica
+       (o BAN_NOTIFICATION si el usuario está baneado)
 ```
 
 ### Flujo 4 — Caída del líder y reconexión
  
 ```
-CentralServer líder deja de enviar Heartbeat
-CentralServer réplica_2 detecta timeout
+réplica_2 detecta PeerDisconnected del líder (conexión TCP cerrada)
+
 réplica_2  ──Election(id=2)──►  réplica_3
 réplica_2  ──Election(id=2)──►  réplica_4
 
-réplica_3  ──Ok──────────────►  réplica_2   (R3 cancela la elección de R2)
-réplica_4  ──Ok──────────────►  réplica_2   (R4 cancela la elección de R2)
-
-réplica_3  ──Election(id=3)──►  réplica_4   (R3 inicia su propia elección)
-réplica_4  ──Ok──────────────►  réplica_3   (R4 cancela la elección de R3)
-
-réplica_4  ──Election(id=4)──►  (nadie con ID mayor responde)
+réplica_3  ──ELECTION_ACK────►  réplica_2
+réplica_4  ──ELECTION_ACK────►  réplica_2
+   (réplica_2 espera COORDINATOR_TIMEOUT; al no recibirlo, reinicia su elección)
+ 
+réplica_3, réplica_4 inician sus propias elecciones al recibir ELECTION
+réplica_4  ──ELECTION(id=4)──►  (nadie con ID mayor responde)
 réplica_4 se proclama líder
-réplica_4  ──Coordinator(id=4, addr)──►  réplica_2
-réplica_4  ──Coordinator(id=4, addr)──►  réplica_3
+réplica_4  ──COORDINATOR(id=4)──►  réplica_2, réplica_3
+ 
+réplica_2, réplica_3 actualizan leader_id=4, is_leader=false
+réplica_4 actualiza is_leader=true y dispara REPLICA_SYNC a todos los peers
 
 Station intenta reportar estado usando la última IP conocida:
 Station  ──StationUpdate──►  réplica_2  (ex líder u otro peer al azar)
