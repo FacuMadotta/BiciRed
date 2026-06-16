@@ -84,12 +84,6 @@ impl Serializable for StationUpdate {
     }
 }
 
-impl Serializable for IsAlive {
-    fn serialize(&self) -> String {
-        format!("{}|{}", MessageType::IsAlive.as_str(), self.leader_id)
-    }
-}
-
 impl Serializable for Election {
     fn serialize(&self) -> String {
         format!("{}|{}", MessageType::Election.as_str(), self.candidate_id)
