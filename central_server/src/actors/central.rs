@@ -71,10 +71,13 @@ impl Actor for CentralServerActor {
                 return;
             }
 
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs(),
+                Err(err) => {
+                    eprintln!("Error obteniendo timestamp: {err}");
+                    return;
+                }
+            };
 
             let mut estaciones_muertas = Vec::new();
             for (id, station) in &act.station_table {
@@ -335,10 +338,13 @@ impl Handler<UpdateStationTimestamp> for CentralServerActor {
 
     fn handle(&mut self, msg: UpdateStationTimestamp, _ctx: &mut Context<Self>) {
         if let Some(station) = self.station_table.get_mut(&msg.station_id) {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_secs(),
+                Err(err) => {
+                    eprintln!("Error obteniendo timestamp: {err}");
+                    return;
+                }
+            };
             station.updated_at_secs = now;
         }
     }

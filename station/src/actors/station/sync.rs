@@ -136,8 +136,16 @@ impl StationActor {
                         let (tx, rx) = mpsc::channel::<String>();
                         station_addr.do_send(CentralServerConnected { sender: tx });
 
-                        let mut stream_writer = stream.try_clone().unwrap();
-                        let mut stream_reader = stream.try_clone().unwrap();
+                        let (mut stream_writer, mut stream_reader) =
+                            match (stream.try_clone(), stream.try_clone()) {
+                                (Ok(writer), Ok(reader)) => (writer, reader),
+                                (Err(err), _) | (_, Err(err)) => {
+                                    eprintln!("[RECONEXIÓN CENTRAL] Error clonando stream: {err}");
+                                    server_idx = (server_idx + 1) % server_addrs.len();
+                                    std::thread::sleep(std::time::Duration::from_secs(1));
+                                    continue;
+                                }
+                            };
 
                         // Hilo escritor: envía mensajes al central mientras haya conexión
                         let sender_handle = std::thread::spawn(move || {
@@ -193,8 +201,14 @@ impl StationActor {
         if let Ok(stream) = TcpStream::connect(&self.payment_ip) {
             println!("[PAYMENT] ¡Conexión establecida!");
             let (tx, rx) = mpsc::channel::<String>();
-            let mut stream_writer = stream.try_clone().unwrap();
-            let mut stream_reader = stream.try_clone().unwrap();
+            let (mut stream_writer, mut stream_reader) =
+                match (stream.try_clone(), stream.try_clone()) {
+                    (Ok(writer), Ok(reader)) => (writer, reader),
+                    (Err(err), _) | (_, Err(err)) => {
+                        eprintln!("[PAYMENT] Error clonando stream: {err}");
+                        return;
+                    }
+                };
             let station_addr = ctx.address();
 
             // Hilo escritor: reenvía mensajes al servicio de pagos

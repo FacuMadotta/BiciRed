@@ -11,8 +11,11 @@ use client::AppClient;
 fn read_input(prompt: &str) -> String {
     let mut input = String::new();
     print!("{}", prompt);
-    io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut input).unwrap();
+    io::stdout().flush().expect("Error al vaciar stdout");
+
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Error al leer stdin");
     input.trim().to_string()
 }
 

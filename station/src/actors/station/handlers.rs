@@ -317,7 +317,10 @@ impl StationActor {
         msg: RequestMessage<RentRequest, ConnectionActor>,
         time: SystemTime,
     ) {
-        let bike_id = self.station.reserve_bike(msg.request.slot_index).unwrap();
+        let bike_id = self
+            .station
+            .reserve_bike(msg.request.slot_index)
+            .expect("El slot fue validado previamente como ocupado");
         self.station.save_inventory();
 
         let rental_id = self.generate_rental_id(bike_id, msg.request.user_id);
