@@ -16,6 +16,7 @@ pub struct CentralServerActor {
     pub elector_addr: Option<Addr<ElectorActor>>,
     pub peer_addrs: HashMap<ServerId, String>,
     pub users_banned: HashMap<UserId, String>,
+    pub indultos: std::collections::HashSet<UserId>,
 }
 
 impl CentralServerActor {
@@ -127,6 +128,10 @@ impl Handler<UserBanned> for CentralServerActor {
     type Result = ();
 
     fn handle(&mut self, msg: UserBanned, _ctx: &mut Context<Self>) {
+        if self.indultos.remove(&msg.user_id) {
+            println!("[CENTRAL] Falso positivo evitado. El usuario {} ya había devuelto la bici en otra estación.", msg.user_id);
+            return;
+        }
         println!(
             "[SERVER] Usuario {} ha sido baneado. Razón: {}",
             msg.user_id, msg.reason
@@ -346,6 +351,19 @@ impl Handler<UpdateStationTimestamp> for CentralServerActor {
                 }
             };
             station.updated_at_secs = now;
+        }
+    }
+}
+
+impl Handler<ReturnRent> for CentralServerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReturnRent, _ctx: &mut Self::Context) {
+        let parts: Vec<&str> = msg.rental_id.split('-').collect();
+        if parts.len() >= 2 {
+            if let Ok(user_id) = parts[1].parse::<UserId>() {
+                self.indultos.insert(user_id);
+            }
         }
     }
 }

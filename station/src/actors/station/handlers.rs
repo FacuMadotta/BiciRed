@@ -277,6 +277,16 @@ impl Handler<RequestFreshPayload> for StationActor {
     }
 }
 
+impl Handler<ReturnRent> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReturnRent, _ctx: &mut Self::Context) {
+        if let Some(user_id) = self.client_id_from_rental(&msg.rental_id) {
+            self.active_rentals.remove(&user_id);
+        }
+    }
+}
+
 impl StationActor {
     pub fn check_transaction_state(&mut self, transaction_id: &str) {
         let both_voted = self
@@ -416,6 +426,15 @@ impl StationActor {
         });
 
         self.sync_with_central();
+
+        if let Some(ref sender) = self.central_server {
+            let central_msg = ReturnRent {
+                rental_id: msg.request.rental_id.clone(),
+                bike_id: msg.request.bike_id,
+            }
+            .serialize();
+            let _ = sender.send(central_msg);
+        }
     }
 
     pub fn process_batch_updates(&mut self) {

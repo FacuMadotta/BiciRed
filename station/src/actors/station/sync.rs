@@ -259,6 +259,7 @@ fn dispatch_central_messages(station_addr: &Addr<StationActor>, data: &str) {
                 MessageType::ReservationRejected => {
                     station_addr.do_send(ReservationRejected::deserialize(line))
                 }
+                MessageType::ReturnRent => station_addr.do_send(ReturnRent::deserialize(line)),
                 _ => {}
             }
         }

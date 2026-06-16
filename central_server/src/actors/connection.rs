@@ -115,6 +115,10 @@ impl ConnectionActor {
                     response_addr: ctx.address(),
                 });
             }
+            "RETURN_RENT" => {
+                let msg = ReturnRent::deserialize(message_text);
+                self.server_addr.do_send(msg);
+            }
             "VALIDATE_USER" => {
                 let validate_msg = ValidateUser::deserialize(message_text);
                 self.server_addr.do_send(ValidateUserMessage {
