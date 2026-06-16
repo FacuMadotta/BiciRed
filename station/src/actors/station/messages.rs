@@ -13,3 +13,9 @@ pub struct CentralServerDisconnected;
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PaymentServiceDisconnected;
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RequestFreshPayload {
+    pub sender: std::sync::mpsc::Sender<String>,
+}

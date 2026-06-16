@@ -10,6 +10,7 @@ use crate::domain::SlotState;
 
 use super::messages::{
     CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected,
+    RequestFreshPayload,
 };
 use super::StationActor;
 
@@ -39,7 +40,7 @@ impl StationActor {
         }
     }
 
-    fn build_station_update_payload(&self) -> String {
+    pub fn build_station_update_payload(&self) -> String {
         let available_bikes = self
             .station
             .slots
@@ -89,7 +90,6 @@ impl StationActor {
     pub fn start_central_connection(&mut self, ctx: &mut Context<Self>) {
         let station_addr = ctx.address();
         let server_addrs = self.server_addrs.clone();
-        let initial_payload = self.build_station_update_payload();
 
         std::thread::spawn(move || {
             let mut server_idx = 0;
@@ -97,7 +97,11 @@ impl StationActor {
                 let target_ip = &server_addrs[server_idx];
                 match TcpStream::connect(target_ip) {
                     Ok(mut stream) => {
-                        if stream.write_all(initial_payload.as_bytes()).is_err() {
+                        let (tx_fresh, rx_fresh) = mpsc::channel();
+                        station_addr.do_send(RequestFreshPayload { sender: tx_fresh });
+                        let fresh_payload = rx_fresh.recv().unwrap_or_default();
+
+                        if stream.write_all(fresh_payload.as_bytes()).is_err() {
                             server_idx = (server_idx + 1) % server_addrs.len();
                             std::thread::sleep(std::time::Duration::from_secs(1));
                             continue;

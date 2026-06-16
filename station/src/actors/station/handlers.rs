@@ -7,6 +7,7 @@ use crate::domain::*;
 
 use super::messages::{
     CentralServerConnected, CentralServerDisconnected, PaymentServiceDisconnected,
+    RequestFreshPayload,
 };
 use super::persistence::{
     flush_pending_file, get_charges_filename, get_rents_filename, parse_charge_record,
@@ -264,6 +265,15 @@ impl Handler<PaymentServiceDisconnected> for StationActor {
 
     fn handle(&mut self, _msg: PaymentServiceDisconnected, _ctx: &mut Self::Context) {
         self.payment_service = None;
+    }
+}
+
+impl Handler<RequestFreshPayload> for StationActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RequestFreshPayload, _ctx: &mut Self::Context) {
+        let fresh_payload = self.build_station_update_payload();
+        let _ = msg.sender.send(fresh_payload);
     }
 }
 
